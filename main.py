@@ -1,5 +1,9 @@
 """
-main.py — Entry point for the Stock Ranking Advisor v2
+main.py — Entry point for the Stock Ranking Advisor v3
+
+Pure quantitative analysis — no paid AI APIs required.
+Uses hedge-fund grade math: DCF, Graham, EV/EBITDA, FCF yield,
+Altman Z, Sharpe/Sortino, ROIC/WACC, Piotroski 9pt, and more.
 
 Run:  python main.py
 """
@@ -15,6 +19,9 @@ from advisor.fetcher    import DataFetcher, MacroFetcher
 from advisor.scorer     import MultiFactorScorer
 from advisor.portfolio  import PortfolioConstructor
 from advisor.learner    import SessionMemory
+from advisor.protocol   import ProtocolAnalyzer
+from advisor.valuation  import ValuationEngine
+from advisor.risk       import RiskEngine
 from advisor.charts     import ChartEngine
 from advisor.display    import TerminalDisplay
 from advisor.exporter   import ExcelExporter
@@ -31,7 +38,7 @@ def main():
     newly_evaluated = memory.evaluate_pending()
     if newly_evaluated:
         print(f"  Evaluated {len(newly_evaluated)} new session(s).")
-    memory.save()   # persist evaluations
+    memory.save()
 
     track_record = memory.get_track_record()
     display.show_welcome(track_record)
@@ -64,6 +71,9 @@ def main():
     macro_data = MacroFetcher().fetch()
     display.show_macro(macro_data)
 
+    # Risk-free rate from live 10Y yield (fallback: 4.5%)
+    rf_rate = (macro_data.get("yield_10y") or 4.5) / 100
+
     # ── 5. Score stocks ───────────────────────────────────────────────────────
     print("Scoring and ranking stocks...")
     scorer    = MultiFactorScorer(profile, macro_data, adapted_weights)
@@ -76,35 +86,62 @@ def main():
     print(f"  Done — {len(ranked_df)} stocks scored.\n")
 
     # ── 6. Correlation-aware selection + Kelly position sizing ────────────────
-    constructor    = PortfolioConstructor()
-    top10          = constructor.select(ranked_df, universe_data)
-    top10_sized    = constructor.size_positions(top10, profile.portfolio_size)
+    constructor = PortfolioConstructor()
+    top10       = constructor.select(ranked_df, universe_data)
+    top10_sized = constructor.size_positions(top10, profile.portfolio_size)
 
-    # ── 7. Terminal display ───────────────────────────────────────────────────
+    # ── 7. Terminal display: quantitative results ─────────────────────────────
     display.show_results(top10_sized)
     display.show_allocation(top10_sized, profile.portfolio_size)
 
-    # ── 8. Charts ─────────────────────────────────────────────────────────────
+    # ── 8. Multi-method valuation (DCF · Graham · EV/EBITDA · FCF yield) ─────
+    print("Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF yield)...")
+    valuation_results = ValuationEngine(rf_rate).analyze_all(top10_sized, universe_data)
+    print(f"  Valuation complete — {len(valuation_results)} stocks valued.\n")
+
+    # ── 9. Risk & quality metrics (Altman Z · Sharpe · Sortino · ROIC/WACC) ──
+    print("Computing risk & quality metrics (Altman Z · Sharpe · Sortino · ROIC/WACC · Piotroski)...")
+    risk_results = RiskEngine().analyze_all(top10_sized, universe_data, rf_rate)
+    print(f"  Risk analysis complete — {len(risk_results)} stocks analyzed.\n")
+
+    # ── 10. Investment protocol analysis (7 gates) ────────────────────────────
+    print("Running 7-gate investment protocol analysis...")
+    protocol_analyzer = ProtocolAnalyzer()
+    protocol_results  = protocol_analyzer.analyze_all(top10_sized, universe_data, valuation_results)
+    print(f"  Protocol complete — {len(protocol_results)} stocks evaluated.\n")
+
+    display.show_protocol(protocol_results)
+
+    # ── 11. Deep quantitative analysis (hedge-fund grade output) ─────────────
+    display.show_deep_analysis(top10_sized, valuation_results, risk_results)
+
+    # ── 12. Charts ────────────────────────────────────────────────────────────
     print("Generating charts...")
     charts = ChartEngine(profile, sp500_hist, macro_data)
     fig1   = charts.score_breakdown(top10_sized)
     fig2   = charts.performance(top10_sized, universe_data)
     fig3   = charts.factor_heatmap(top10_sized)
     fig4   = charts.macro_dashboard(top10_sized, universe_data)
-    charts.save_all([fig1, fig2, fig3, fig4])
+    fig5   = charts.thought_process(top10_sized, protocol_results, valuation_results, risk_results)
+    charts.save_all([fig1, fig2, fig3, fig4, fig5])
 
-    # ── 9. Excel export ───────────────────────────────────────────────────────
+    # ── 13. Excel export ──────────────────────────────────────────────────────
     print("Exporting to Excel...")
-    ExcelExporter().export(top10_sized, macro_data, profile, memory, top10_sized)
+    ExcelExporter().export(
+        top10_sized, macro_data, profile, memory, top10_sized,
+        protocol_results=protocol_results,
+        valuation_results=valuation_results,
+        risk_results=risk_results,
+    )
 
-    # ── 10. Save session ──────────────────────────────────────────────────────
+    # ── 14. Save session ──────────────────────────────────────────────────────
     sp500_price = 0.0
     if sp500_hist is not None and len(sp500_hist) > 0:
         sp500_price = float(sp500_hist["Close"].iloc[-1])
     memory.save_session(profile, top10_sized, sp500_price)
     memory.save()
 
-    # ── 11. Disclaimer + show charts ─────────────────────────────────────────
+    # ── 15. Disclaimer + show charts ─────────────────────────────────────────
     display.show_disclaimer()
 
     import matplotlib.pyplot as plt

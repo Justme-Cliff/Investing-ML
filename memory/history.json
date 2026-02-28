@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "learned_weights": {},
+  "sessions": [
+    {
+      "session_id": "1a1fb4bf",
+      "timestamp": "2026-02-28T07:35:54.011241+00:00",
+      "profile": {
+        "risk_level": 3,
+        "time_horizon": "medium",
+        "goal": "income"
+      },
+      "sp500_entry": 6878.8798828125,
+      "evaluated": false,
+      "evaluation": null,
+      "picks": [
+        {
+          "ticker": "AMAT",
+          "price_entry": 372.29998779296875,
+          "composite_score": 87.79562812519183,
+          "factors": {
+            "momentum": 100.0,
+            "volatility": 35.94220075231795,
+            "value": 68.17966185442799,
+            "quality": 76.48396125088998,
+            "technical": 93.51304134630955,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "LRCX",
+          "price_entry": 233.88999938964844,
+          "composite_score": 85.074865834218,
+          "factors": {
+            "momentum": 97.66401573042513,
+            "volatility": 29.797869442602504,
+            "value": 59.93035936128397,
+            "quality": 94.10010527601284,
+            "technical": 57.19711718858633,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "KLAC",
+          "price_entry": 1524.550048828125,
+          "composite_score": 83.46140788503311,
+          "factors": {
+            "momentum": 68.31418967586208,
+            "volatility": 35.164331105144356,
+            "value": 62.98569807380681,
+            "quality": 94.75544340664335,
+            "technical": 96.44986993775898,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "NEM",
+          "price_entry": 130.0,
+          "composite_score": 82.27167655621324,
+          "factors": {
+            "momentum": 75.86609625376879,
+            "volatility": 44.18726002441385,
+            "value": 70.89493637003416,
+            "quality": 66.42548505146495,
+            "technical": 93.39883601737618,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "SPG",
+          "price_entry": 203.85000610351562,
+          "composite_score": 79.50659986857704,
+          "factors": {
+            "momentum": 40.43694246440971,
+            "volatility": 78.83809840345978,
+            "value": 90.51859156717029,
+            "quality": 88.00009423757031,
+            "technical": 80.23011586921287,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "ALB",
+          "price_entry": 178.6699981689453,
+          "composite_score": 78.0242247335668,
+          "factors": {
+            "momentum": 88.02850936013691,
+            "volatility": 0.0,
+            "value": 100.0,
+            "quality": 28.574222888201557,
+            "technical": 99.11042645737157,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "LLY",
+          "price_entry": 1051.989990234375,
+          "composite_score": 74.67025777152915,
+          "factors": {
+            "momentum": 45.99456390666956,
+            "volatility": 52.6987856277032,
+            "value": 51.25050036680627,
+            "quality": 87.0634814917761,
+            "technical": 100.0,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "MRK",
+          "price_entry": 123.81999969482422,
+          "composite_score": 74.11523548308435,
+          "factors": {
+            "momentum": 58.817264056877896,
+            "volatility": 78.01874403556319,
+            "value": 82.17234457029025,
+            "quality": 69.42909638489053,
+            "technical": 53.24228895891091,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "GILD",
+          "price_entry": 148.9499969482422,
+          "composite_score": 73.14567494249458,
+          "factors": {
+            "momentum": 49.67021731968707,
+            "volatility": 75.64645788028946,
+            "value": 76.94168031707737,
+            "quality": 70.6446045432766,
+            "technical": 70.09121651550404,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "LMT",
+          "price_entry": 658.0800170898438,
+          "composite_score": 73.12830658667183,
+          "factors": {
+            "momentum": 63.67616007850464,
+            "volatility": 83.00024352118773,
+            "value": 64.53133760823955,
+            "quality": 54.51678337606963,
+            "technical": 65.0616043101769,
+            "sentiment": 50.0,
+            "dividend": 100.0
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -312,6 +312,277 @@ class ChartEngine:
         return fig
 
     # ─────────────────────────────────────────────────────────────────────────
+    # Chart 5 — Quantitative protocol report (gates + entry + quant conviction)
+    # ─────────────────────────────────────────────────────────────────────────
+    def thought_process(self, top10: pd.DataFrame,
+                        protocol_results: list,
+                        valuation_results: dict = None,
+                        risk_results: dict = None) -> plt.Figure:
+        """
+        Three-panel quantitative protocol report:
+          ┌─────────────────────┬────────────────────┐
+          │  Protocol Gate      │  Entry Price       │
+          │  Scorecard          │  Positioning       │
+          │  (7 gates × stocks) │  (% vs fair value) │
+          ├─────────────────────┴────────────────────┤
+          │  Conviction + entry prices + quant thesis │
+          └───────────────────────────────────────────┘
+        """
+        from advisor.protocol import GATE_SHORT, PASS_THRESHOLD, WARN_THRESHOLD
+
+        tickers   = top10["ticker"].tolist()
+        n_stocks  = len(tickers)
+        n_gates   = 7
+        proto_map = {p["ticker"]: p for p in protocol_results}
+        val_map   = valuation_results or {}
+        risk_map  = risk_results or {}
+
+        fig = plt.figure(figsize=(17, 12))
+        fig.patch.set_facecolor(BG_DARK)
+
+        # Outer grid: top 62% + bottom 38%
+        gs_outer = gridspec.GridSpec(2, 1, figure=fig,
+                                     height_ratios=[0.62, 0.38], hspace=0.06)
+        # Top: gate grid (left 57%) + entry chart (right 43%)
+        gs_top = gridspec.GridSpecFromSubplotSpec(
+            1, 2, subplot_spec=gs_outer[0], wspace=0.04, width_ratios=[0.57, 0.43]
+        )
+        ax_gates   = fig.add_subplot(gs_top[0])
+        ax_entry   = fig.add_subplot(gs_top[1])
+        ax_verdict = fig.add_subplot(gs_outer[1])
+
+        for ax in (ax_gates, ax_entry):
+            _dark_axes(ax)
+
+        # ── Panel A: Protocol gate scorecard ─────────────────────────────────
+        gate_matrix = np.full((n_stocks, n_gates), 50.0)
+        for i, t in enumerate(tickers):
+            gates = proto_map.get(t, {}).get("gates", [])
+            for j, g in enumerate(gates[:n_gates]):
+                gate_matrix[i, j] = float(g)
+
+        cmap_proto = mcolors.LinearSegmentedColormap.from_list(
+            "protocol", ["#da3633", "#e3b341", "#3fb950"], N=256
+        )
+        im = ax_gates.imshow(gate_matrix, cmap=cmap_proto,
+                             vmin=0, vmax=100, aspect="auto")
+
+        for ri in range(n_stocks):
+            for ci in range(n_gates):
+                v         = gate_matrix[ri, ci]
+                txt_color = "#000000" if 40 <= v <= 80 else TXT_WHITE
+                ax_gates.text(ci, ri, f"{v:.0f}", ha="center", va="center",
+                              fontsize=8, color=txt_color, fontweight="bold")
+
+        # Pass/Fail summary at right edge of each row
+        for i, t in enumerate(tickers):
+            p = proto_map.get(t, {})
+            pc, fc = p.get("pass_count", 0), p.get("fail_count", 0)
+            col = "#3fb950" if fc == 0 else "#e3b341" if fc <= 2 else "#da3633"
+            ax_gates.text(n_gates + 0.05, i, f"{pc}P {fc}F",
+                          ha="left", va="center", fontsize=7.5, color=col,
+                          transform=ax_gates.get_xaxis_transform())
+
+        ax_gates.set_xticks(range(n_gates))
+        ax_gates.set_xticklabels(GATE_SHORT, color=TXT_WHITE, fontsize=9,
+                                 rotation=30, ha="right")
+        ax_gates.tick_params(axis="x", top=True, bottom=False,
+                             labeltop=True, labelbottom=False, colors=TXT_WHITE)
+        ax_gates.set_yticks(range(n_stocks))
+        ax_gates.set_yticklabels(
+            [f"#{i+1}  {t}" for i, t in enumerate(tickers)],
+            color=TXT_WHITE, fontsize=9
+        )
+        ax_gates.set_title("PROTOCOL GATE SCORECARD  (7 Gates · 0–100)",
+                           color=TXT_WHITE, fontsize=11, fontweight="bold", pad=12)
+
+        # Colorbar legend
+        cbar = plt.colorbar(im, ax=ax_gates, shrink=0.55, pad=0.16, aspect=18)
+        cbar.set_label("Gate Score", color=TXT_DIM, fontsize=8)
+        cbar.ax.yaxis.set_tick_params(color=TXT_DIM, labelcolor=TXT_DIM, labelsize=7)
+        for marker in [35, 60]:
+            cbar.ax.axhline(marker, color="#555", linewidth=0.8)
+
+        # ── Panel B: Entry price positioning ─────────────────────────────────
+        SIGNAL_COLORS = {
+            "STRONG_BUY":        "#3fb950",
+            "BUY":               "#79c0ff",
+            "HOLD_WATCH":        "#e3b341",
+            "WAIT":              "#f78166",
+            "AVOID_PEAK":        "#da3633",
+            "INSUFFICIENT_DATA": "#8b949e",
+        }
+
+        # Shaded zones (% vs fair value on x-axis)
+        ax_entry.axvline(0,   color=TXT_WHITE,  linewidth=1.2, alpha=0.5, linestyle="--")
+        ax_entry.axvline(-20, color="#3fb950", linewidth=0.8, alpha=0.4, linestyle=":")
+        ax_entry.axvspan(-40, -20, alpha=0.07, color="#3fb950")  # strong buy
+        ax_entry.axvspan(-20,   0, alpha=0.07, color="#79c0ff")  # buy
+        ax_entry.axvspan(  0,  10, alpha=0.07, color="#e3b341")  # watch
+        ax_entry.axvspan( 10,  45, alpha=0.05, color="#da3633")  # expensive
+
+        for i, t in enumerate(tickers):
+            # Prefer ValuationEngine entry_analysis, fall back to protocol
+            ea = val_map.get(t, {})
+            if not ea.get("fair_value"):
+                ea = proto_map.get(t, {}).get("entry_analysis", {})
+            else:
+                # Map ValuationEngine fields to entry_analysis format
+                ea = {
+                    "fair_value":    ea.get("fair_value"),
+                    "entry_target":  ea.get("entry_low"),
+                    "current_price": ea.get("current_price"),
+                    "signal":        ea.get("signal", "INSUFFICIENT_DATA"),
+                    "premium_pct":   ea.get("premium_pct"),
+                }
+
+            prem   = ea.get("premium_pct")
+            signal = ea.get("signal", "INSUFFICIENT_DATA")
+            color  = SIGNAL_COLORS.get(signal, "#8b949e")
+            y      = n_stocks - 1 - i        # flip so rank 1 is at top
+
+            if prem is not None:
+                bar_l = min(-20.0, prem)
+                bar_r = prem
+                ax_entry.barh(y, bar_r - bar_l, left=bar_l,
+                              color=color, alpha=0.30, height=0.6)
+                ax_entry.scatter([prem], [y], color=color, s=70, zorder=5)
+                lbl = f"${ea.get('current_price','?')} ({prem:+.0f}%)"
+                ax_entry.text(prem + 0.8, y, lbl, va="center", ha="left",
+                              color=color, fontsize=7.5)
+            else:
+                ax_entry.scatter([0], [y], color="#8b949e", s=50, marker="x")
+                ax_entry.text(1, y, "No fair value data", va="center",
+                              color="#8b949e", fontsize=7.5)
+
+        ax_entry.set_yticks(range(n_stocks))
+        ax_entry.set_yticklabels([t for t in tickers[::-1]],
+                                 color=TXT_WHITE, fontsize=9)
+        ax_entry.set_xlim(-42, 50)
+        ax_entry.set_xlabel("% vs Fair Value  (0 = Fair Value  |  negative = discount)",
+                            color=TXT_DIM, fontsize=9)
+        ax_entry.set_title("ENTRY PRICE POSITIONING\n(DCF · Graham · EV/EBITDA · FCF Yield median)",
+                           color=TXT_WHITE, fontsize=11, fontweight="bold", pad=8)
+
+        # Zone annotations at top
+        top_y = n_stocks - 0.45
+        for x, lbl, col in [(-30, "STRONG BUY", "#3fb950"), (-10, "BUY", "#79c0ff"),
+                             (5, "WATCH", "#e3b341"), (27, "EXPENSIVE", "#da3633")]:
+            ax_entry.text(x, top_y, lbl, ha="center", va="center",
+                          fontsize=7, color=col, alpha=0.85)
+        ax_entry.grid(axis="x", alpha=0.10, color="white")
+
+        # ── Panel C: Quantitative conviction + entry prices + thesis ──────────
+        ax_verdict.set_facecolor(BG_PANEL)
+        for sp in ax_verdict.spines.values():
+            sp.set_edgecolor(BORDER)
+        ax_verdict.set_xticks([])
+        ax_verdict.set_yticks([])
+
+        CONV_COLORS = {
+            "HIGH":   "#3fb950",
+            "MEDIUM": "#e3b341",
+            "LOW":    "#f78166",
+            "AVOID":  "#da3633",
+        }
+
+        verdict_ax = ax_verdict.transAxes
+        n_rows = n_stocks
+        row_h  = 0.88 / n_rows
+        y_top  = 0.94
+
+        for i, t in enumerate(tickers):
+            proto = proto_map.get(t, {})
+            val   = val_map.get(t, {})
+            risk  = risk_map.get(t, {})
+            conv  = proto.get("conviction", "MEDIUM")
+            color = CONV_COLORS.get(conv, TXT_DIM)
+
+            # Prefer ValuationEngine signal over protocol signal
+            ea  = proto.get("entry_analysis", {})
+            sig = val.get("signal") or ea.get("signal", "")
+            sig_c = SIGNAL_COLORS.get(sig, TXT_DIM)
+
+            y_c = y_top - i * row_h - row_h * 0.5
+
+            # Conviction badge
+            badge = mpatches.FancyBboxPatch(
+                (0.002, y_c - row_h * 0.38), 0.065, row_h * 0.76,
+                boxstyle="round,pad=0.005", transform=verdict_ax,
+                facecolor=color, edgecolor="none", alpha=0.85, clip_on=False
+            )
+            ax_verdict.add_patch(badge)
+            ax_verdict.text(0.035, y_c, conv[:4], ha="center", va="center",
+                           fontsize=7, fontweight="bold", color="black",
+                           transform=verdict_ax)
+
+            # Ticker + valuation signal
+            ax_verdict.text(0.075, y_c, f"#{i+1} {t}",
+                           ha="left", va="center", fontsize=9,
+                           fontweight="bold", color=color, transform=verdict_ax)
+            ax_verdict.text(0.175, y_c, f"[{sig}]",
+                           ha="left", va="center", fontsize=8,
+                           color=sig_c, transform=verdict_ax)
+
+            # Entry price (prefer ValuationEngine)
+            fv  = val.get("fair_value") or ea.get("fair_value")
+            ent = val.get("entry_low")  or ea.get("entry_target")
+            cur = val.get("current_price") or ea.get("current_price")
+            if fv and ent and cur:
+                price_info = f"FV ${fv:,.0f}  →  Entry ${ent:,.0f}  (now ${cur:,.0f})"
+            elif fv and cur:
+                price_info = f"FV ${fv:,.0f}  (now ${cur:,.0f})"
+            else:
+                price_info = "Entry: insufficient valuation data"
+            ax_verdict.text(0.345, y_c, price_info,
+                           ha="left", va="center", fontsize=7.5,
+                           color=TXT_DIM, transform=verdict_ax)
+
+            # Auto-generated quantitative thesis from risk/valuation data
+            thesis_parts = []
+            if val.get("methods_count", 0) >= 2:
+                prem = val.get("premium_pct", 0) or 0
+                thesis_parts.append(
+                    f"{abs(prem):.0f}% {'above' if prem > 0 else 'below'} FV"
+                    f" ({val.get('methods_count',0)}-method median)"
+                )
+            rw = risk.get("roic_wacc", {})
+            if rw.get("spread") is not None:
+                thesis_parts.append(f"ROIC/WACC {rw['spread']:+.1f}% [{rw.get('verdict','')}]")
+            piotr = risk.get("piotroski", {})
+            if piotr.get("score") is not None:
+                thesis_parts.append(f"Piotroski {piotr['score']}/9")
+            az = risk.get("altman_z", {})
+            if az.get("zone"):
+                thesis_parts.append(f"Altman Z [{az['zone']}]")
+            thesis = "  ·  ".join(thesis_parts) if thesis_parts else "Quantitative data pending"
+            if len(thesis) > 100:
+                thesis = thesis[:97] + "..."
+            ax_verdict.text(0.62, y_c, thesis,
+                           ha="left", va="center", fontsize=8,
+                           color=TXT_DIM, transform=verdict_ax)
+
+        # Column headers
+        for x, lbl in [(0.035, "CONV"), (0.120, "TICKER / SIGNAL"),
+                       (0.345, "ENTRY ANALYSIS"), (0.620, "QUANTITATIVE THESIS")]:
+            ax_verdict.text(x, 0.97, lbl, ha="left", va="center",
+                           fontsize=7, color=TXT_DIM, fontweight="bold",
+                           transform=verdict_ax)
+
+        fig.suptitle(
+            "QUANTITATIVE INVESTMENT PROTOCOL REPORT",
+            color=TXT_WHITE, fontsize=14, fontweight="bold", y=0.993
+        )
+        ax_verdict.set_title(
+            "7-Gate Protocol  ·  DCF · Graham · EV/EBITDA · FCF Yield  ·  "
+            "ROIC/WACC · Piotroski · Altman Z  ·  No AI APIs required",
+            color=TXT_DIM, fontsize=8, pad=6
+        )
+
+        fig.tight_layout(rect=[0, 0, 1, 0.992], pad=1.0)
+        return fig
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Save all
     # ─────────────────────────────────────────────────────────────────────────
     def save_all(self, figs: list):
@@ -320,6 +591,7 @@ class ChartEngine:
             "chart2_performance.png",
             "chart3_factor_heatmap.png",
             "chart4_macro_dashboard.png",
+            "chart5_ai_protocol.png",        # NEW: thought process
         ]
         for fig, name in zip(figs, names):
             try:

@@ -59,6 +59,20 @@ STOCK_UNIVERSE = {
     ],
 }
 
+# ── Sector median EV/EBITDA multiples (approximate) ──────────────────────────
+SECTOR_EV_EBITDA = {
+    "Technology":  22,
+    "Healthcare":  16,
+    "Financials":  12,
+    "Consumer":    16,
+    "Energy":       8,
+    "Industrials": 14,
+    "Utilities":   12,
+    "Real Estate": 20,
+    "Materials":   10,
+    "Unknown":     14,
+}
+
 # ── Sector median P/E ratios (approximate, updated periodically) ──────────────
 SECTOR_MEDIAN_PE = {
     "Technology":  28,

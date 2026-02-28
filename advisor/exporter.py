@@ -33,7 +33,10 @@ except ImportError:
 class ExcelExporter:
 
     def export(self, top10: pd.DataFrame, macro_data: dict,
-               profile, memory, allocation_df: pd.DataFrame):
+               profile, memory, allocation_df: pd.DataFrame,
+               protocol_results: list = None,
+               valuation_results: dict = None,
+               risk_results: dict = None):
         if not _OPENPYXL:
             print("  openpyxl not installed — skipping Excel export.")
             print("  Run:  pip install openpyxl")
@@ -57,9 +60,12 @@ class ExcelExporter:
         self._write_macro(wb, macro_data)
         self._write_history(wb, memory)
         self._write_track_record(wb, memory)
+        if protocol_results:
+            self._write_deep_analysis(wb, protocol_results, valuation_results, risk_results)
 
+        n_sheets = len(wb.sheetnames)
         wb.save(BOOK_PATH)
-        print(f"  Excel export saved → {BOOK_PATH}  (5 sheets)")
+        print(f"  Excel export saved → {BOOK_PATH}  ({n_sheets} sheets)")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
     @staticmethod
@@ -208,6 +214,177 @@ class ExcelExporter:
             ]
             for ci, val in enumerate(vals, 1):
                 ws.cell(row=ri, column=ci, value=val)
+
+    # ── Sheet 6: Deep Quantitative Analysis ──────────────────────────────────
+    def _write_deep_analysis(self, wb, protocol_results: list,
+                             valuation_results: dict = None,
+                             risk_results: dict = None):
+        ws = self._get_or_create_sheet(wb, "Deep Analysis")
+        val_map  = valuation_results or {}
+        risk_map = risk_results or {}
+
+        ws["A1"] = f"Deep Quantitative Analysis  —  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        ws["A1"].font = Font(bold=True, color="58a6ff", size=11)
+        ws.row_dimensions[1].height = 18
+        ws["A2"] = "7-Gate Protocol  ·  DCF · Graham · EV/EBITDA · FCF Yield  ·  ROIC/WACC · Piotroski · Altman Z  ·  No AI APIs required"
+        ws["A2"].font = Font(italic=True, color="8b949e", size=9)
+        ws.row_dimensions[2].height = 14
+
+        # ── Section 1: Gate scorecard ─────────────────────────────────────────
+        gate_headers = [
+            "Rank", "Ticker", "Protocol Score", "Conviction",
+            "Quality", "Moat", "Health", "Valuation", "Tech Entry", "News", "Trend",
+            "Pass", "Warn", "Fail",
+            "Fair Value", "Entry Low", "Entry High", "Current Price", "Signal", "Methods",
+        ]
+        self._header_row(ws, gate_headers, row=4)
+
+        SIGNAL_FILL = {
+            "STRONG_BUY":  "1A7F37",
+            "BUY":         "1F6BAA",
+            "HOLD_WATCH":  "7D5A00",
+            "WAIT":        "8A3700",
+            "AVOID_PEAK":  "6E2323",
+        }
+
+        for ri, p in enumerate(protocol_results, 5):
+            t     = p["ticker"]
+            ea    = p.get("entry_analysis", {})
+            gates = p.get("gates", [0] * 7)
+            val   = val_map.get(t, {})
+
+            # Prefer ValuationEngine data for fair value columns
+            fv   = val.get("fair_value")   or ea.get("fair_value")
+            elo  = val.get("entry_low")    or ea.get("entry_target")
+            ehi  = val.get("entry_high")   or ea.get("entry_target")
+            cur  = val.get("current_price") or ea.get("current_price")
+            sig  = val.get("signal")       or ea.get("signal", "N/A")
+            nmth = val.get("methods_count") or ea.get("num_methods", 0)
+
+            row_data = [
+                ri - 4, t,
+                round(p.get("overall_score", 0), 1),
+                p.get("conviction", "?"),
+            ] + [round(g, 0) for g in gates[:7]] + [
+                p.get("pass_count", 0),
+                p.get("warn_count", 0),
+                p.get("fail_count", 0),
+                f"${fv:,.2f}"  if fv  else "N/A",
+                f"${elo:,.2f}" if elo else "N/A",
+                f"${ehi:,.2f}" if ehi else "N/A",
+                f"${cur:,.2f}" if cur else "N/A",
+                sig,
+                nmth,
+            ]
+            for ci, val_ in enumerate(row_data, 1):
+                cell = ws.cell(row=ri, column=ci, value=val_)
+                cell.alignment = Alignment(horizontal="center")
+                if 5 <= ci <= 11:
+                    v = float(val_) if val_ else 0
+                    cell.fill = self._score_fill(v)
+                    cell.font = Font(color=HDR_FONT, size=9)
+                if ci == 19:   # Signal column
+                    sf = SIGNAL_FILL.get(str(val_), "")
+                    if sf:
+                        cell.fill = PatternFill("solid", fgColor=sf)
+                        cell.font = Font(bold=True, color=HDR_FONT)
+
+        # Auto-width for gate table
+        for col in ws.columns:
+            max_len = 0
+            for cell in col:
+                try:
+                    max_len = max(max_len, len(str(cell.value or "")))
+                except Exception:
+                    pass
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 3, 28)
+
+        # ── Section 2: Valuation detail ───────────────────────────────────────
+        row_start = len(protocol_results) + 8
+        ws.cell(row_start, 1, "MULTI-METHOD VALUATION DETAIL").font = Font(bold=True, color="58a6ff", size=11)
+        row_start += 1
+        val_headers = [
+            "Ticker", "DCF", "Graham Number", "EV/EBITDA Target", "FCF Yield Target",
+            "Fair Value (median)", "Entry Low (−20%)", "Entry High (−10%)",
+            "Target Price (+20%)", "Stop Loss", "Premium%", "Upside%", "R/R Ratio", "Signal",
+        ]
+        self._header_row(ws, val_headers, row=row_start)
+        row_start += 1
+        for p in protocol_results:
+            t   = p["ticker"]
+            val = val_map.get(t, {})
+            est = val.get("estimates", {})
+            row_data = [
+                t,
+                f"${est['dcf']:,.2f}"        if est.get("dcf")        else "N/A",
+                f"${est['graham']:,.2f}"      if est.get("graham")     else "N/A",
+                f"${est['ev_ebitda']:,.2f}"   if est.get("ev_ebitda")  else "N/A",
+                f"${est['fcf_yield']:,.2f}"   if est.get("fcf_yield")  else "N/A",
+                f"${val['fair_value']:,.2f}"  if val.get("fair_value") else "N/A",
+                f"${val['entry_low']:,.2f}"   if val.get("entry_low")  else "N/A",
+                f"${val['entry_high']:,.2f}"  if val.get("entry_high") else "N/A",
+                f"${val['target_price']:,.2f}" if val.get("target_price") else "N/A",
+                f"${val['stop_loss']:,.2f}"   if val.get("stop_loss")  else "N/A",
+                f"{val['premium_pct']:+.1f}%" if val.get("premium_pct") is not None else "N/A",
+                f"{val['upside_pct']:+.1f}%"  if val.get("upside_pct") is not None else "N/A",
+                f"{val['rr_ratio']:.2f}:1"    if val.get("rr_ratio")  else "N/A",
+                val.get("signal", "N/A"),
+            ]
+            for ci, v in enumerate(row_data, 1):
+                cell = ws.cell(row=row_start, column=ci, value=v)
+                cell.alignment = Alignment(horizontal="center")
+            row_start += 1
+
+        # ── Section 3: Risk metrics ───────────────────────────────────────────
+        row_start += 2
+        ws.cell(row_start, 1, "RISK & QUALITY METRICS").font = Font(bold=True, color="58a6ff", size=11)
+        row_start += 1
+        risk_headers = [
+            "Ticker",
+            "Altman Z", "Z Zone",
+            "Sharpe", "Sortino",
+            "Max DD%", "VaR 95% (1mo)",
+            "ROIC%", "WACC%", "ROIC-WACC Spread", "Verdict",
+            "Accruals Ratio", "Gross/Assets",
+            "Piotroski", "/9", "Interpretation",
+        ]
+        self._header_row(ws, risk_headers, row=row_start)
+        row_start += 1
+        for p in protocol_results:
+            t    = p["ticker"]
+            risk = risk_map.get(t, {})
+            az   = risk.get("altman_z", {})
+            rw   = risk.get("roic_wacc", {})
+            pf   = risk.get("piotroski", {})
+            row_data = [
+                t,
+                f"{az['score']:.2f}"   if az.get("score") is not None else "N/A",
+                az.get("zone", "N/A"),
+                f"{risk['sharpe']:.2f}"  if risk.get("sharpe")  is not None else "N/A",
+                f"{risk['sortino']:.2f}" if risk.get("sortino") is not None else "N/A",
+                f"{risk['max_drawdown_pct']:.1f}%" if risk.get("max_drawdown_pct") is not None else "N/A",
+                f"{risk['var_95_pct']:.1f}%"       if risk.get("var_95_pct")       is not None else "N/A",
+                f"{rw['roic']:.1f}%"    if rw.get("roic")   is not None else "N/A",
+                f"{rw['wacc']:.1f}%"    if rw.get("wacc")   is not None else "N/A",
+                f"{rw['spread']:+.1f}%" if rw.get("spread") is not None else "N/A",
+                rw.get("verdict", "N/A"),
+                f"{risk['accruals']:.3f}"   if risk.get("accruals")    is not None else "N/A",
+                f"{risk['gross_prof']:.3f}" if risk.get("gross_prof")  is not None else "N/A",
+                pf.get("score", "N/A"),
+                pf.get("out_of", 9),
+                pf.get("interpretation", "N/A"),
+            ]
+            for ci, v in enumerate(row_data, 1):
+                cell = ws.cell(row=row_start, column=ci, value=v)
+                cell.alignment = Alignment(horizontal="center", wrap_text=(ci == len(row_data)))
+                if ci == 3:   # Z zone colour
+                    zone_clr = {"SAFE": "1A7F37", "GRAY": "7D5A00", "DISTRESS": "6E2323"}.get(str(v))
+                    if zone_clr:
+                        cell.fill = PatternFill("solid", fgColor=zone_clr)
+                        cell.font = Font(bold=True, color=HDR_FONT)
+            row_start += 1
+
+        ws.freeze_panes = "A5"
 
     # ── Sheet 5: Track Record ─────────────────────────────────────────────────
     def _write_track_record(self, wb, memory):

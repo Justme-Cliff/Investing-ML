@@ -1,8 +1,32 @@
-# Stock Ranking Advisor v2
+# Stock Ranking Advisor v3
 
-A fully local, free-data Python terminal tool that ranks stocks based on your personal investment profile using a 7-factor quantitative model with macro regime detection, adaptive learning, and Excel export.
+A fully local, hedge-fund grade quantitative stock analysis tool built entirely on free data.
+No paid APIs. No AI subscriptions. Just Yahoo Finance + serious math.
 
-**No paid APIs. No AI APIs. Just Yahoo Finance (free) + your laptop.**
+It ranks ~110 stocks across your investment profile, runs a 7-gate Warren Buffett protocol,
+computes intrinsic value using 4 independent methods, and delivers a level of analysis that
+would cost thousands per month on a professional terminal — for free.
+
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+---
+
+## What's New in v3
+
+- **Multi-method valuation engine** — DCF, Graham Number, EV/EBITDA target, FCF yield target
+- **Full risk suite** — Altman Z-Score, Sharpe, Sortino, Max Drawdown, VaR 95%, ROIC/WACC spread
+- **Full Piotroski F-Score** — all 9 points across profitability, leverage, and efficiency
+- **12-1 skip-month momentum** — the academic-grade version that avoids short-term reversal
+- **EV/EBITDA in value scoring** — sector-median enterprise value multiples
+- **Accruals ratio + Gross Profitability** — earnings quality and Novy-Marx (2013) quality factor
+- **5-factor technical score** — added Bollinger %B and OBV trend to RSI + MACD + MA
+- **7-gate protocol** — Gate 3 now includes Altman Z; Gate 4 driven by the valuation engine
+- **Scary-detailed terminal output** — full valuation matrix, ROIC/WACC verdict, Piotroski, risk profile per stock
+- **Quantitative protocol chart** — replaces AI output with auto-generated quant thesis per stock
+- **Deep Analysis Excel sheet** — 3 sections: gate scorecard, valuation detail, risk metrics
 
 ---
 
@@ -16,32 +40,38 @@ pip install -r requirements.txt
 python main.py
 ```
 
----
-
-## What It Does
-
-1. **Asks 7 smart questions** to build your investor profile
-2. **Fetches real-time data** for ~110 stocks via Yahoo Finance (free)
-3. **Computes 7 factor scores** per stock using proven quant methods
-4. **Detects the macro regime** (risk-on / risk-off / rising rates) from VIX + yields + sector ETFs
-5. **Selects 10 stocks** using a greedy correlation-aware algorithm (diversified, not just top 10)
-6. **Sizes positions** using half-Kelly criterion (risk-adjusted, capped at 20% per stock)
-7. **Exports to `Book1.xlsx`** with 5 formatted sheets
-8. **Generates 4 charts** and saves them as PNGs
-9. **Remembers every session** and learns which factors actually predicted returns over time
+No API keys. No accounts. No subscriptions.
 
 ---
 
-## The 7 Questions
+## What It Does (15-Step Pipeline)
+
+| Step | Action |
+|------|--------|
+| 1–2 | Load session memory, show track record vs S&P 500 |
+| 3–4 | Collect 7-question investor profile |
+| 5–7 | Fetch ~110 stocks, S&P 500 benchmark, and macro data (VIX, 10Y yield, sector ETFs) |
+| 8 | Score all stocks on 7 factors with macro regime tilt |
+| 9 | Select top 10 via greedy correlation-aware algorithm + half-Kelly position sizing |
+| 10 | Display ranked results and allocation table |
+| 11 | **ValuationEngine** — 4-method fair value, entry zones, stop loss, risk/reward ratio |
+| 12 | **RiskEngine** — Altman Z, Sharpe, Sortino, Max DD, VaR, ROIC/WACC, Piotroski |
+| 13 | **7-Gate Protocol** — each stock must pass quality, moat, health, valuation, entry, news, trend |
+| 14 | **Deep analysis output** — full per-stock terminal report (valuation matrix, quality metrics, risk profile) |
+| 15 | 5 charts + Excel export + save session to memory |
+
+---
+
+## The 7-Question Investor Profile
 
 | # | Question | Why It Matters |
-|---|----------|---------------|
-| 1 | Portfolio size | Drives position sizing and share counts |
-| 2 | Time horizon (1yr / 3yr / 5yr) | Short-term → momentum-heavy; long-term → value + quality heavy |
-| 3 | Risk tolerance (1–4) | Controls beta/volatility filters and weight distribution |
-| 4 | Investment goal | Income goal boosts dividend weight; speculative goal boosts momentum |
-| 5 | Drawdown gut check | Extra volatility penalty if you can't stomach large drops |
-| 6 | Sector focus / exclusions | Filters universe; adds score bonus to preferred sectors |
+|---|----------|----------------|
+| 1 | Portfolio size | Drives dollar amounts and approx share counts |
+| 2 | Time horizon (1yr / 3yr / 5yr) | Short-term → momentum-heavy; long-term → value + quality |
+| 3 | Risk tolerance (1–4) | Controls beta filters and factor weight distribution |
+| 4 | Investment goal | Income goal lifts dividend weight; speculative lifts momentum |
+| 5 | Drawdown gut check | Adds volatility penalty if you can't stomach large drops |
+| 6 | Sector focus / exclusions | Filters universe; sector score bonus for preferred sectors |
 | 7 | Existing holdings | Removes overlap from recommendations |
 
 ---
@@ -50,131 +80,219 @@ python main.py
 
 Each stock is scored 0–100 on seven independent factors, then combined using a weight matrix tuned to your risk profile and time horizon.
 
-### Factor 1 — Momentum
-Weighted combination of 1-month (20%), 3-month (35%), and 6-month (45%) price returns.
-Higher recent returns score higher. Emphasised for aggressive / short-term profiles.
+### Factor 1 — Momentum (upgraded: 12-1 skip-month)
+Academic-grade momentum that avoids the well-documented 1-month reversal effect:
+- 1-month (10%) + 3-month (25%) + 6-month (35%) + **12-1 skip-month (30%)**
+- Skip-month = return from 252 days ago to 21 days ago (excludes recent reversal window)
 
 ### Factor 2 — Volatility
 Annualised standard deviation of daily returns, **inverted** — low volatility scores high.
 Heavily weighted for conservative profiles; near-zero for speculative.
 
-### Factor 3 — Value
-Uses trailing P/E relative to the sector median. Cheaper than peers = higher score.
-Enhanced with a free cash flow yield proxy (FCF / market cap) for quality validation.
+### Factor 3 — Value (upgraded: EV/EBITDA composite)
+Three-signal composite:
+- **P/E vs sector median (40%)** — trailing P/E relative to peers
+- **EV/EBITDA vs sector median (35%)** — enterprise-level valuation multiple
+- **FCF yield (25%)** — free cash flow / market cap (quality-adjusted value)
 
-### Factor 4 — Quality (Piotroski-inspired)
-An 8-point fundamental checklist:
-1. Return on Assets > 4%
-2. Operating cash flow > 0
-3. Free cash flow > 0
-4. Debt / Equity < 1.0
-5. Current ratio > 1.5
-6. Profit margins > 10%
-7. Revenue growth > 0
-8. Earnings growth > 0
+### Factor 4 — Quality (upgraded: accruals + gross profitability)
+Extended quality model:
+- **Piotroski-style 8-point checklist** (ROA, OCF, FCF, D/E, CR, margins, rev growth, earnings growth) — 80% weight
+- **Accruals ratio** — (net income − OCF) / total assets; negative = earnings backed by cash, not accounting — 20% blend
+- **Gross Profitability** (Novy-Marx 2013) — gross profit / total assets; high = durable competitive advantage
 
-Score = (points / 8) × 100. Blended with ROE and profit margins for richness.
-
-### Factor 5 — Technical
-Computed entirely from price history — no extra data needed.
-- **RSI (14-day, 30%)**: Ideal zone 40–65. Oversold gets contrarian bonus, overbought penalised.
-- **MACD (12/26/9, 40%)**: Above signal + positive histogram = bullish (88/100).
-- **MA crossover (30%)**: Price > SMA50 > SMA200 = strong uptrend (90/100). Golden cross = +12 bonus.
+### Factor 5 — Technical (upgraded: 5-factor)
+All computed from price and volume history — no extra data needed:
+- **RSI 14-day (25%)** — ideal zone 40–65; oversold gets contrarian bonus
+- **MACD 12/26/9 (30%)** — above signal + positive histogram = bullish
+- **MA crossover (20%)** — price > SMA50 > SMA200 = strong uptrend; golden cross bonus
+- **Bollinger %B (15%)** — price position within band; 0.20–0.65 = healthy range
+- **OBV trend (10%)** — OBV 20-day SMA > OBV 50-day SMA = smart money confirmation
 
 ### Factor 6 — Sentiment
-Fetches the last 7 news headlines for each ticker via Yahoo Finance (no extra API).
-Scores headlines using 50+ curated positive/negative financial words.
-Maps from −1/+1 range → 0–100.
+Fetches the last 12 news headlines via Yahoo Finance (no extra API).
+Scores using 50+ curated financial positive/negative keywords → 0–100.
+Nudged by analyst consensus recommendation (strong_buy adds +15, strong_sell −25).
 
 ### Factor 7 — Dividend
 Raw dividend yield (capped at 15% to prevent outliers dominating).
-Heavily weighted only for income-focused profiles (goal = "income").
+Heavily weighted only for income-focused profiles.
 
 ---
 
-## Weight Matrix
-
-The 7 weights vary by (risk_level × time_horizon). Examples:
+## Weight Matrix (examples)
 
 | Profile | Mom | Vol | Val | Qual | Tech | Sent | Div |
 |---------|-----|-----|-----|------|------|------|-----|
-| Low / Long | 5% | 18% | 27% | 25% | 5% | 5% | 15% |
+| Low risk / Long term | 5% | 18% | 27% | 25% | 5% | 5% | 15% |
 | Moderate / Medium | 18% | 14% | 22% | 25% | 11% | 5% | 5% |
-| High / Short | 38% | 7% | 12% | 22% | 16% | 5% | 0% |
+| High risk / Short term | 38% | 7% | 12% | 22% | 16% | 5% | 0% |
 | Speculative / Short | 45% | 4% | 8% | 22% | 16% | 5% | 0% |
 
 ---
 
 ## Macro Regime Detection
 
-Fetched from Yahoo Finance (^VIX, ^TNX, sector ETFs XLK/XLV/XLF/...):
+Fetched live from Yahoo Finance (^VIX, ^TNX, sector ETFs XLK/XLV/XLF/...):
 
-| Regime | Trigger | Effect |
-|--------|---------|--------|
-| Risk-On | VIX < 16 | +4 pts Tech, +3 Consumer, −5 Utilities |
+| Regime | Trigger | Score Tilt |
+|--------|---------|------------|
+| Risk-On | VIX < 16 | +4 Tech, +3 Consumer, −5 Utilities |
 | Risk-Off | VIX > 27 | +7 Utilities, +5 Healthcare, −4 Tech |
-| Rising Rate | 10Y yield ↑ > 0.35% in 1 month | +5 Financials, −7 REITs, −5 Utilities |
-| Falling Rate | 10Y yield ↓ > 0.30% | +5 REITs, +5 Utilities, +3 Tech |
-| Neutral | Otherwise | No tilt |
+| Rising Rate | 10Y yield up >0.35% in 1mo | +5 Financials, −7 REITs, −5 Utilities |
+| Falling Rate | 10Y yield down >0.30% | +5 REITs, +5 Utilities, +3 Tech |
 
-Top-3 sector ETFs by 3-month return also get a +3 bonus.
+Top-3 sector ETFs by 3-month performance also receive a +3 bonus.
 
 ---
 
 ## Portfolio Construction
 
-After scoring all valid stocks:
+1. **Top 30 candidates** by composite score enter the selection pool
+2. **Pearson correlation matrix** computed on daily returns
+3. **Greedy diversification** — each pick chosen to maximise `score × (0.70 + 0.30 × (1 − avg_corr_with_selected))`
+4. Final 10 are both high-scoring **and** genuinely uncorrelated
 
-1. **Top 30 candidates** selected by composite score
-2. **Correlation matrix** computed (Pearson on daily returns)
-3. **Greedy diversification**: each next pick chosen to maximise `score × (0.70 + 0.30 × (1 − avg_correlation_with_selected))`
-4. This ensures the final 10 are both high-quality **and** not all moving together
-
-**Position sizing** (half-Kelly):
-- Kelly fraction = `(score/100) / vol² / 2`
-- Capped at 20% per position
-- Renormalised to sum = 100%
+**Position sizing (half-Kelly):**
+- `kelly = (score/100) / vol² / 2`
+- Capped at 20% per position, renormalised to sum = 100%
 
 ---
 
-## Adaptive Learning
+## ValuationEngine — 4 Independent Methods
 
-Every session is saved to `memory/history.json`.
+Every stock in the top 10 is valued using four fundamentally different approaches.
+When multiple methods converge on a similar price, that convergence **is** the conviction signal.
 
-After 30+ days, the tool automatically:
-1. Fetches current prices for past picks
-2. Calculates each pick's return vs the S&P 500
-3. Measures which factors actually correlated with returns (Pearson r)
-4. If a factor had avg r > 0.3 → its weight increases 4%
-5. If a factor had avg r < 0.0 → its weight decreases 4%
-6. Weights are renormalised and floored at 3%
+| Method | Formula | What It Captures |
+|--------|---------|-----------------|
+| **DCF (2-stage)** | FCF/share × 5yr growth + terminal value, discounted at rf + 5.5% | Future cash generation ability |
+| **Graham Number** | √(22.5 × EPS × Book Value/share) | Benjamin Graham's classic intrinsic value |
+| **EV/EBITDA Target** | EBITDA × sector median multiple → implied price | How the market values peers |
+| **FCF Yield Target** | FCF/share ÷ 4.5% target yield | Price at which the stock pays 4.5% in free cash |
 
-The more sessions you run, the smarter the weights become for your specific profile.
-
----
-
-## Excel Export (Book1.xlsx)
-
-Five sheets, auto-formatted with conditional colour coding:
-
-| Sheet | Contents |
-|-------|----------|
-| **Latest Picks** | Top 10 with all 7 factor scores (green/amber/red) |
-| **Allocation** | Weight%, dollar amounts, approx shares |
-| **Macro Overview** | VIX, 10Y yield, regime, sector ETF rankings |
-| **History** | All past sessions with tickers |
-| **Track Record** | Evaluated sessions with alpha vs S&P 500 |
+**Output per stock:**
+- Fair value (median of available methods)
+- Entry low (FV × 0.80) — strong buy zone, 20% margin of safety
+- Entry high (FV × 0.90) — buy zone, 10% margin of safety
+- Target price (FV × 1.20)
+- Stop loss (entry_low × 0.92)
+- Risk/reward ratio (upside to target ÷ downside to stop)
+- Signal: `STRONG_BUY` | `BUY` | `HOLD_WATCH` | `WAIT` | `AVOID_PEAK`
 
 ---
 
-## Charts (4 PNGs)
+## RiskEngine — Full Risk & Quality Suite
+
+| Metric | What It Measures |
+|--------|-----------------|
+| **Altman Z-Score** | Bankruptcy risk — SAFE (>2.6) / GRAY (1.1–2.6) / DISTRESS (<1.1) |
+| **Sharpe Ratio** | Risk-adjusted return: (return − rf) / vol × √252 |
+| **Sortino Ratio** | Downside-only Sharpe — penalises losses, not upside volatility |
+| **Max Drawdown** | Worst peak-to-trough over the period |
+| **VaR 95% (1mo)** | 5th percentile of 21-day rolling returns — worst month in 20 |
+| **ROIC/WACC Spread** | ROA as ROIC proxy vs CAPM WACC; positive = value creation |
+| **Accruals Ratio** | (Net Income − OCF) / Total Assets; negative = clean, cash-backed earnings |
+| **Gross Profitability** | Gross Profit / Total Assets (Novy-Marx 2013 quality factor) |
+| **Piotroski F-Score** | Full 9-point: 4 profitability + 3 leverage/liquidity + 2 efficiency signals |
+
+ROIC/WACC verdicts: `EXCEPTIONAL` (>15%) | `STRONG` (>8%) | `POSITIVE` (>2%) | `NEUTRAL` | `DESTROYING VALUE`
+
+---
+
+## The 7-Gate Investment Protocol
+
+Every stock in the top 10 must pass through 7 quality gates before a buy signal is issued.
+
+| Gate | Weight | What It Checks |
+|------|--------|---------------|
+| 1. Business Quality | 20% | ROA, ROE, FCF, profit margins, revenue & earnings growth |
+| 2. Competitive Moat | 15% | Gross margins, operating margins, market cap (scale) |
+| 3. Financial Health | 15% | Debt/equity, current ratio, interest coverage, **Altman Z-Score** |
+| 4. Valuation | 22% | **ValuationEngine signal (65%)** + P/E vs sector + FCF yield + PEG (35%) |
+| 5. Technical Entry | 10% | 52-week high proximity, analyst consensus upside, forward P/E |
+| 6. News & Sentiment | 8% | Sentiment score + analyst recommendation |
+| 7. Trend Alignment | 10% | SMA200, SMA50, 3-month momentum |
+
+**Gate thresholds:** PASS (≥60) | WARN (35–59) | FAIL (<35)
+
+**Conviction levels:**
+- `HIGH` — ≤1 FAIL, overall ≥70, ≥6 gates pass
+- `MEDIUM` — ≤2 FAILs, ≥4 gates pass
+- `LOW` — 3+ FAILs
+
+---
+
+## Per-Stock Deep Analysis Output
+
+For each of the top 10, the terminal prints a full investment brief:
+
+```
+#1  AAPL  —  Apple Inc.  |  Technology  |  Composite: 87.4/100
+┌── VALUATION (4 independent methods)
+│  DCF (2-stage)        $198.50  │  current +17.9% premium
+│  Graham Number        $185.30  │  current +26.2% premium
+│  EV/EBITDA Target     $241.80  │  current  -3.4% discount
+│  FCF Yield @4.5%      $227.50  │  current  +2.8% premium
+│  ─────────────────────────────────────────────────────────
+│  Median Fair Value  : $213.30  │  Entry Zone: $170.60 – $192.00
+│  Target Price       : $256.00  │  Stop Loss: $157.00  │  R/R: 1.8:1
+└── Signal: ⏳ WAIT  (9.8% above fair value)
+
+┌── QUALITY & VALUE CREATION
+│  ROIC 28.4%  WACC ~9.7%  Spread +18.7%  [EXCEPTIONAL — significant economic value added]
+│  Piotroski 7/9 [STRONG]  ·  Accruals -0.040 CLEAN (cash > accounting earnings)
+│  Gross Profit / Assets 0.43
+└──
+
+┌── RISK PROFILE
+│  Altman Z 4.2 [✓ SAFE]  ·  Sharpe 1.82  ·  Sortino 2.41
+│  Max DD -22.1%  ·  VaR(95% 1mo) -8.4%  ·  Beta 1.31  ·  Ann. Vol 32.1%
+└──
+```
+
+---
+
+## Charts (5 PNGs)
 
 | File | Contents |
 |------|----------|
 | `chart1_score_breakdown.png` | Stacked horizontal bars — factor contribution per stock |
 | `chart2_performance.png` | Normalised price history vs S&P 500 |
 | `chart3_factor_heatmap.png` | 10 × 7 colour grid of all factor scores |
-| `chart4_macro_dashboard.png` | VIX trend · 10Y yield · sector ETF returns · correlation matrix |
+| `chart4_macro_dashboard.png` | VIX · 10Y yield · sector ETF returns · correlation matrix |
+| `chart5_quant_protocol.png` | **Protocol gate scorecard · Entry price positioning · Quant thesis per stock** |
+
+Chart 5 auto-generates a one-line thesis from the data, e.g.:
+> *"18% below FV (3-method median)  ·  ROIC/WACC +21.4% [EXCEPTIONAL]  ·  Piotroski 7/9  ·  Altman Z [SAFE]"*
+
+---
+
+## Excel Export (Book1.xlsx — 6 Sheets)
+
+| Sheet | Contents |
+|-------|----------|
+| **Latest Picks** | Top 10 with all 7 factor scores (green/amber/red colour coding) |
+| **Allocation** | Weight%, dollar amounts, approx shares at current price |
+| **Macro Overview** | VIX, 10Y yield, regime, sector ETF rankings |
+| **History** | All past sessions with tickers picked |
+| **Track Record** | Evaluated sessions — avg return, S&P return, alpha |
+| **Deep Analysis** | Gate scorecard · Full valuation detail (all 4 methods) · Risk metrics table |
+
+---
+
+## Adaptive Learning
+
+Every session is saved to `memory/history.json`. After 30+ days:
+
+1. Current prices are fetched for all past picks
+2. Each pick's return vs S&P 500 is calculated
+3. Pearson correlation measures which factors actually predicted returns
+4. Factors with avg r > 0.3 → weight increases 4%
+5. Factors with avg r < 0.0 → weight decreases 4%
+6. Weights renormalised and floored at 3%
+
+The more sessions you run, the smarter the factor weights become.
 
 ---
 
@@ -182,23 +300,45 @@ Five sheets, auto-formatted with conditional colour coding:
 
 ```
 portfolio/
-├── main.py                 ← Run this
-├── config.py               ← Universe, weights, word lists
+├── main.py                 ← Run this (15-step pipeline)
+├── config.py               ← Universe, weight matrix, sector multiples
+├── requirements.txt        ← yfinance, pandas, numpy, matplotlib, rich, openpyxl
 ├── advisor/
 │   ├── collector.py        ← 7-question profile builder
-│   ├── fetcher.py          ← yfinance + technicals + sentiment
-│   ├── scorer.py           ← 7-factor scoring + macro tilt
-│   ├── portfolio.py        ← Correlation-aware selection + Kelly sizing
-│   ├── learner.py          ← Session memory + weight adaptation
-│   ├── charts.py           ← 4 matplotlib charts
-│   ├── display.py          ← Terminal output
-│   └── exporter.py         ← Excel export
+│   ├── fetcher.py          ← yfinance + 5-factor technicals + sentiment
+│   ├── scorer.py           ← 7-factor scoring with 12-1 momentum, EV/EBITDA, accruals
+│   ├── portfolio.py        ← Correlation-aware selection + half-Kelly sizing
+│   ├── valuation.py        ← DCF · Graham · EV/EBITDA · FCF yield engine
+│   ├── risk.py             ← Altman Z · Sharpe · Sortino · ROIC/WACC · Piotroski
+│   ├── protocol.py         ← 7-gate Warren Buffett investment protocol
+│   ├── learner.py          ← Session memory + adaptive weight learning
+│   ├── charts.py           ← 5 dark-theme matplotlib charts
+│   ├── display.py          ← Terminal output + deep analysis
+│   └── exporter.py         ← Excel export (6 sheets)
 ├── memory/
 │   └── history.json        ← Auto-created, grows over time
-├── stock_advisor.py        ← Original simple version (v1)
-├── requirements.txt
-└── README.md
+├── Book1.xlsx              ← Auto-generated on each run
+├── chart1_score_breakdown.png
+├── chart2_performance.png
+├── chart3_factor_heatmap.png
+├── chart4_macro_dashboard.png
+└── chart5_quant_protocol.png
 ```
+
+---
+
+## Dependencies
+
+```
+yfinance>=0.2.36    # free stock data
+pandas>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+rich>=13.0.0        # terminal formatting
+openpyxl>=3.1.0     # Excel export
+```
+
+No paid APIs. No API keys. No accounts required.
 
 ---
 
@@ -206,5 +346,5 @@ portfolio/
 
 This tool is for **educational and informational purposes only**.
 Past performance does not guarantee future results.
-Rankings are quantitative metrics and are **not financial advice**.
-Always conduct your own due diligence before investing.
+Rankings and valuations are quantitative outputs and are **not financial advice**.
+Always conduct your own due diligence before making any investment decisions.

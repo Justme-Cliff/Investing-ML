@@ -44,7 +44,10 @@ def _macd(close: pd.Series):
 
 
 def _technical_score(history: pd.DataFrame) -> float:
-    """RSI (30%) + MACD (40%) + MA crossover (30%) → 0–100."""
+    """
+    RSI (25%) + MACD (30%) + MA crossover (20%) + Bollinger %B (15%) + OBV trend (10%)
+    → 0–100
+    """
     close = history["Close"].dropna()
     if len(close) < 50:
         return 50.0
@@ -53,9 +56,9 @@ def _technical_score(history: pd.DataFrame) -> float:
     rsi_series = _rsi(close)
     last_rsi   = float(rsi_series.dropna().iloc[-1]) if len(rsi_series.dropna()) else 50.0
     if 40 <= last_rsi <= 65:
-        rsi_score = 80 + (1 - abs(last_rsi - 52.5) / 12.5) * 20   # sweet spot → 80–100
+        rsi_score = 80 + (1 - abs(last_rsi - 52.5) / 12.5) * 20
     elif last_rsi < 30:
-        rsi_score = 72   # oversold — contrarian opportunity
+        rsi_score = 72   # oversold — contrarian buy
     elif last_rsi > 80:
         rsi_score = 10   # very overbought
     elif last_rsi > 70:
@@ -70,18 +73,18 @@ def _technical_score(history: pd.DataFrame) -> float:
     if len(hist_series.dropna()) < 2:
         macd_score = 50.0
     else:
-        lm  = float(macd_line.iloc[-1])
-        ls  = float(sig_line.iloc[-1])
-        lh  = float(hist_series.iloc[-1])
-        ph  = float(hist_series.iloc[-2])
+        lm = float(macd_line.iloc[-1])
+        ls = float(sig_line.iloc[-1])
+        lh = float(hist_series.iloc[-1])
+        ph = float(hist_series.iloc[-2])
         if lm > ls and lh > 0:
-            macd_score = 88          # bullish and strengthening
+            macd_score = 88
         elif lm > ls and lh < 0:
-            macd_score = 63          # bullish but losing steam
+            macd_score = 63
         elif lm < ls and lh > ph:
-            macd_score = 42          # bearish but momentum improving
+            macd_score = 42
         elif lm < ls and lh < 0 and lh < ph:
-            macd_score = 15          # bearish and worsening
+            macd_score = 15
         else:
             macd_score = 50
 
@@ -101,16 +104,52 @@ def _technical_score(history: pd.DataFrame) -> float:
             ma_score = 40
         else:
             ma_score = 15
-        # Golden cross bonus
         if len(sma50.dropna()) >= 2 and len(sma200.dropna()) >= 2:
-            ps50 = float(sma50.dropna().iloc[-2])
+            ps50  = float(sma50.dropna().iloc[-2])
             ps200 = float(sma200.dropna().iloc[-2])
             if s50 > s200 and ps50 <= ps200:
                 ma_score = min(ma_score + 12, 100)
     else:
         ma_score = 75 if cur > s50 else 35
 
-    return 0.30 * rsi_score + 0.40 * macd_score + 0.30 * ma_score
+    # ── Bollinger %B score ────────────────────────────────────────────────────
+    # %B = 0 → at lower band  |  %B = 1 → at upper band
+    # Ideal buy zone: 0.20–0.65  (neither overbought nor oversold)
+    bb_score = 50.0
+    if len(close) >= 20:
+        sma20 = close.rolling(20).mean()
+        std20 = close.rolling(20).std()
+        upper = sma20 + 2 * std20
+        lower = sma20 - 2 * std20
+        bw    = float(upper.iloc[-1] - lower.iloc[-1])
+        if bw > 0:
+            pctb = float(close.iloc[-1] - lower.iloc[-1]) / bw
+            if 0.20 <= pctb <= 0.65:
+                bb_score = 78 + (1 - abs(pctb - 0.425) / 0.225) * 12
+            elif pctb < 0.10:
+                bb_score = 68    # near lower band → potential oversold bounce
+            elif pctb > 0.90:
+                bb_score = 12    # near upper band → overbought warning
+            elif pctb > 0.80:
+                bb_score = 30
+            else:
+                bb_score = 55
+
+    # ── OBV trend score ───────────────────────────────────────────────────────
+    # Rising OBV (20d SMA > 50d SMA) = smart-money accumulation = bullish
+    obv_score = 50.0
+    vol_col = "Volume" if "Volume" in history.columns else None
+    if vol_col and len(close) >= 50:
+        vol_series = history[vol_col].fillna(0)
+        obv = (np.sign(close.diff()) * vol_series).fillna(0).cumsum()
+        if len(obv) >= 50:
+            obv20 = obv.rolling(20).mean().dropna()
+            obv50 = obv.rolling(50).mean().dropna()
+            if len(obv20) > 0 and len(obv50) > 0:
+                obv_score = 80 if float(obv20.iloc[-1]) > float(obv50.iloc[-1]) else 28
+
+    return (0.25 * rsi_score + 0.30 * macd_score + 0.20 * ma_score
+            + 0.15 * bb_score + 0.10 * obv_score)
 
 
 def _piotroski(info: dict) -> float:
@@ -245,18 +284,23 @@ class DataFetcher:
                 if history is None or len(history) < 63:
                     return None
 
-                sector   = self._map_sector(info.get("sector", ""), ticker)
-                tech     = _technical_score(history)
-                piotr    = _piotroski(info)
-                sent     = _sentiment(news)
+                sector      = self._map_sector(info.get("sector", ""), ticker)
+                tech        = _technical_score(history)
+                piotr       = _piotroski(info)
+                sent        = _sentiment(news)
+                news_titles = [
+                    item.get("title", "") for item in news[:12]
+                    if item.get("title")
+                ]
 
                 return {
-                    "info":      info,
-                    "history":   history,
-                    "sector":    sector,
-                    "technical": tech,
-                    "piotroski": piotr,
-                    "sentiment": sent,
+                    "info":        info,
+                    "history":     history,
+                    "sector":      sector,
+                    "technical":   tech,
+                    "piotroski":   piotr,
+                    "sentiment":   sent,
+                    "news_titles": news_titles,   # raw headlines for AI & protocol
                 }
             except Exception:
                 if attempt < 2:
