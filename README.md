@@ -7,10 +7,22 @@ It ranks ~110 stocks across your investment profile, runs a 7-gate Warren Buffet
 computes intrinsic value using 4 independent methods, and delivers a level of analysis that
 would cost thousands per month on a professional terminal — for free.
 
+---
+
+## Two Ways to Run
+
+### CLI Pipeline (terminal + charts + Excel)
 ```bash
 pip install -r requirements.txt
 python main.py
 ```
+
+### Streamlit Web Dashboard (browser-based)
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+Opens at `http://localhost:8501` — white background, black text, 6 interactive tabs.
 
 ---
 
@@ -25,22 +37,22 @@ python main.py
 - **5-factor technical score** — added Bollinger %B and OBV trend to RSI + MACD + MA
 - **7-gate protocol** — Gate 3 now includes Altman Z; Gate 4 driven by the valuation engine
 - **Scary-detailed terminal output** — full valuation matrix, ROIC/WACC verdict, Piotroski, risk profile per stock
-- **Quantitative protocol chart** — replaces AI output with auto-generated quant thesis per stock
+- **Quantitative protocol chart** — auto-generated quant thesis per stock (no AI)
 - **Deep Analysis Excel sheet** — 3 sections: gate scorecard, valuation detail, risk metrics
+- **Streamlit dashboard** — fully interactive browser UI with Plotly charts
 
 ---
 
-## Quick Start
+## Streamlit Dashboard — 6 Tabs
 
-```bash
-# Install dependencies (one time)
-pip install -r requirements.txt
-
-# Run the advisor
-python main.py
-```
-
-No API keys. No accounts. No subscriptions.
+| Tab | Contents |
+|-----|----------|
+| **Rankings** | Top-3 pick cards with signal + conviction badges; full rankings table; stacked factor bar chart |
+| **Valuation** | 4-method valuation matrix; entry positioning chart (current price vs entry zone); method spread |
+| **Risk & Quality** | Risk metrics table; Sharpe vs ROIC/WACC bubble scatter; Piotroski F-Score bar chart |
+| **Protocol Gates** | 10×7 gate heatmap (Plotly, red→amber→green); protocol summary with pass/warn/fail indicators |
+| **Portfolio** | Donut allocation chart; position breakdown table with weight bars |
+| **Macro & Performance** | VIX + 10Y yield tiles; sector ETF returns bar; normalised price history vs S&P 500; correlation heatmap |
 
 ---
 
@@ -223,7 +235,7 @@ Every stock in the top 10 must pass through 7 quality gates before a buy signal 
 
 ---
 
-## Per-Stock Deep Analysis Output
+## Per-Stock Deep Analysis Output (CLI)
 
 For each of the top 10, the terminal prints a full investment brief:
 
@@ -253,7 +265,7 @@ For each of the top 10, the terminal prints a full investment brief:
 
 ---
 
-## Charts (5 PNGs)
+## CLI Charts (5 PNGs)
 
 | File | Contents |
 |------|----------|
@@ -300,9 +312,12 @@ The more sessions you run, the smarter the factor weights become.
 
 ```
 portfolio/
-├── main.py                 ← Run this (15-step pipeline)
+├── main.py                 ← CLI pipeline (15 steps)
+├── app.py                  ← Streamlit dashboard (streamlit run app.py)
 ├── config.py               ← Universe, weight matrix, sector multiples
-├── requirements.txt        ← yfinance, pandas, numpy, matplotlib, rich, openpyxl
+├── requirements.txt        ← All dependencies
+├── .streamlit/
+│   └── config.toml         ← Streamlit theme settings
 ├── advisor/
 │   ├── collector.py        ← 7-question profile builder
 │   ├── fetcher.py          ← yfinance + 5-factor technicals + sentiment
@@ -312,12 +327,12 @@ portfolio/
 │   ├── risk.py             ← Altman Z · Sharpe · Sortino · ROIC/WACC · Piotroski
 │   ├── protocol.py         ← 7-gate Warren Buffett investment protocol
 │   ├── learner.py          ← Session memory + adaptive weight learning
-│   ├── charts.py           ← 5 dark-theme matplotlib charts
-│   ├── display.py          ← Terminal output + deep analysis
-│   └── exporter.py         ← Excel export (6 sheets)
+│   ├── charts.py           ← 5 dark-theme matplotlib charts (CLI)
+│   ├── display.py          ← Terminal output + deep analysis (CLI)
+│   └── exporter.py         ← Excel export — 6 sheets (CLI)
 ├── memory/
 │   └── history.json        ← Auto-created, grows over time
-├── Book1.xlsx              ← Auto-generated on each run
+├── Book1.xlsx              ← Auto-generated on each CLI run
 ├── chart1_score_breakdown.png
 ├── chart2_performance.png
 ├── chart3_factor_heatmap.png
@@ -333,9 +348,11 @@ portfolio/
 yfinance>=0.2.36    # free stock data
 pandas>=2.0.0
 numpy>=1.24.0
-matplotlib>=3.7.0
-rich>=13.0.0        # terminal formatting
-openpyxl>=3.1.0     # Excel export
+matplotlib>=3.7.0   # CLI charts
+rich>=13.0.0        # terminal formatting (CLI)
+openpyxl>=3.1.0     # Excel export (CLI)
+streamlit>=1.32.0   # web dashboard
+plotly>=5.18.0      # interactive dashboard charts
 ```
 
 No paid APIs. No API keys. No accounts required.
