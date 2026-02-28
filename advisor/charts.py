@@ -585,6 +585,147 @@ class ChartEngine:
     # ─────────────────────────────────────────────────────────────────────────
     # Save all
     # ─────────────────────────────────────────────────────────────────────────
+    # ─────────────────────────────────────────────────────────────────────────
+    # Chart 6 — Candlestick chart (dark theme, with volume + SMA + RSI)
+    # ─────────────────────────────────────────────────────────────────────────
+    def candlestick(self, ticker: str, history: pd.DataFrame,
+                    period: str = "6mo") -> plt.Figure:
+        """
+        Dark-theme OHLCV candlestick chart with:
+          - SMA 20 (amber), SMA 50 (blue), SMA 200 (red dashed)
+          - Volume panel (green/red bars)
+          - RSI(14) panel with overbought/oversold bands
+        Uses mplfinance if available, falls back to pure matplotlib.
+        """
+        if history is None or history.empty:
+            fig, ax = plt.subplots()
+            fig.patch.set_facecolor(BG_DARK)
+            ax.set_facecolor(BG_PANEL)
+            ax.text(0.5, 0.5, "No data available", color=TXT_DIM,
+                    ha="center", va="center", transform=ax.transAxes)
+            return fig
+
+        # Trim to requested period
+        period_days = {"1mo": 21, "3mo": 63, "6mo": 126, "1y": 252,
+                       "2y": 504, "5y": 1260}
+        days  = period_days.get(period, 126)
+        df    = history.tail(days).copy()
+        df    = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+
+        # Indicators
+        df["sma20"]  = df["Close"].rolling(20).mean()
+        df["sma50"]  = df["Close"].rolling(50).mean()
+        df["sma200"] = df["Close"].rolling(200).mean()
+        delta        = df["Close"].diff()
+        gain         = delta.clip(lower=0).rolling(14).mean()
+        loss         = (-delta.clip(upper=0)).rolling(14).mean()
+        rs           = gain / loss
+        df["rsi"]    = 100 - (100 / (1 + rs))
+
+        try:
+            import mplfinance as mpf
+
+            mc    = mpf.make_marketcolors(
+                up="#3fb950", down="#da3633",
+                wick={"up": "#3fb950", "down": "#da3633"},
+                volume={"up": "#3fb950", "down": "#da3633"},
+                edge={"up": "#3fb950", "down": "#da3633"},
+            )
+            style = mpf.make_mpf_style(
+                marketcolors=mc,
+                facecolor=BG_PANEL, figcolor=BG_DARK,
+                gridcolor=BORDER, gridstyle="--",
+                y_on_right=True,
+                rc={
+                    "axes.labelcolor":  TXT_DIM,
+                    "axes.edgecolor":   BORDER,
+                    "xtick.color":      TXT_DIM,
+                    "ytick.color":      TXT_DIM,
+                    "figure.titlesize": 13,
+                },
+            )
+            add_plots = [
+                mpf.make_addplot(df["sma20"],  color="#e3b341", width=1.2,
+                                 label="SMA 20"),
+                mpf.make_addplot(df["sma50"],  color="#79c0ff", width=1.2,
+                                 label="SMA 50"),
+                mpf.make_addplot(df["sma200"], color="#f78166", width=1.2,
+                                 linestyle="--", label="SMA 200"),
+                mpf.make_addplot(df["rsi"], panel=2, color="#d2a8ff",
+                                 width=1.5, ylabel="RSI(14)"),
+            ]
+            fig, axes = mpf.plot(
+                df, type="candle", style=style,
+                volume=True, addplot=add_plots,
+                returnfig=True, figsize=(14, 9),
+                panel_ratios=(3, 1, 1),
+                title=f"\n{ticker} — Candlestick  ({period})",
+            )
+            fig.patch.set_facecolor(BG_DARK)
+            return fig
+
+        except ImportError:
+            # Fallback: pure matplotlib candlestick
+            return self._candlestick_fallback(ticker, df, period)
+
+    def _candlestick_fallback(self, ticker: str, df: pd.DataFrame,
+                               period: str) -> plt.Figure:
+        """Pure-matplotlib fallback when mplfinance is not installed."""
+        fig = plt.figure(figsize=(14, 9), facecolor=BG_DARK)
+        gs  = gridspec.GridSpec(3, 1, figure=fig, hspace=0.06,
+                                height_ratios=[3, 1, 1])
+        ax1 = fig.add_subplot(gs[0])   # price
+        ax2 = fig.add_subplot(gs[1], sharex=ax1)  # volume
+        ax3 = fig.add_subplot(gs[2], sharex=ax1)  # RSI
+
+        for ax in (ax1, ax2, ax3):
+            _dark_axes(ax)
+            ax.tick_params(labelbottom=False)
+        ax3.tick_params(labelbottom=True)
+
+        x = np.arange(len(df))
+        w = 0.6
+        for i, (_, row) in enumerate(df.iterrows()):
+            o, h, l, c = row["Open"], row["High"], row["Low"], row["Close"]
+            color = "#3fb950" if c >= o else "#da3633"
+            ax1.plot([x[i], x[i]], [l, h], color=color, linewidth=0.8)
+            ax1.bar(x[i], abs(c - o), w, bottom=min(o, c), color=color)
+
+        for col, style, lbl in [
+            ("sma20",  {"color": "#e3b341", "lw": 1.2}, "SMA 20"),
+            ("sma50",  {"color": "#79c0ff", "lw": 1.2}, "SMA 50"),
+            ("sma200", {"color": "#f78166", "lw": 1.2, "ls": "--"}, "SMA 200"),
+        ]:
+            vals = df[col].values
+            ax1.plot(x, vals, label=lbl, **style)
+
+        ax1.legend(loc="upper left", fontsize=8, facecolor=BG_PANEL,
+                   labelcolor=TXT_DIM, framealpha=0.7)
+        ax1.set_title(f"{ticker} — Candlestick  ({period})",
+                      color=TXT_WHITE, fontsize=12, pad=8)
+        ax1.set_ylabel("Price ($)", color=TXT_DIM, fontsize=9)
+
+        vol_colors = ["#3fb950" if df["Close"].iloc[i] >= df["Open"].iloc[i]
+                      else "#da3633" for i in range(len(df))]
+        ax2.bar(x, df["Volume"].values, width=w, color=vol_colors, alpha=0.7)
+        ax2.set_ylabel("Volume", color=TXT_DIM, fontsize=8)
+
+        rsi_vals = df["rsi"].values
+        ax3.plot(x, rsi_vals, color="#d2a8ff", linewidth=1.5)
+        ax3.axhline(70, color="#da3633", linewidth=0.8, linestyle="--")
+        ax3.axhline(30, color="#3fb950", linewidth=0.8, linestyle="--")
+        ax3.fill_between(x, rsi_vals, 70, where=(rsi_vals >= 70),
+                         alpha=0.15, color="#da3633")
+        ax3.fill_between(x, rsi_vals, 30, where=(rsi_vals <= 30),
+                         alpha=0.15, color="#3fb950")
+        ax3.set_ylim(0, 100)
+        ax3.set_ylabel("RSI(14)", color=TXT_DIM, fontsize=8)
+
+        plt.setp(ax1.get_xticklabels(), visible=False)
+        plt.setp(ax2.get_xticklabels(), visible=False)
+        fig.tight_layout()
+        return fig
+
     def save_all(self, figs: list):
         names = [
             "chart1_score_breakdown.png",

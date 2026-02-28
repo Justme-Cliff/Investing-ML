@@ -22,7 +22,7 @@ python main.py
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Opens at `http://localhost:8501` — white background, black text, 6 interactive tabs.
+Opens at `http://localhost:8501` — white background, black text, 7 interactive tabs.
 
 ---
 
@@ -39,24 +39,30 @@ Opens at `http://localhost:8501` — white background, black text, 6 interactive
 - **Scary-detailed terminal output** — full valuation matrix, ROIC/WACC verdict, Piotroski, risk profile per stock
 - **Quantitative protocol chart** — auto-generated quant thesis per stock (no AI)
 - **Deep Analysis Excel sheet** — 3 sections: gate scorecard, valuation detail, risk metrics
-- **Streamlit dashboard** — fully interactive browser UI with Plotly charts
+- **Streamlit dashboard** — fully interactive browser UI with Plotly charts (7 tabs)
+- **Multi-source news aggregation** — Yahoo Finance + RSS + optional Finnhub + NewsAPI (all free)
+- **CLI slash commands** — interactive REPL after analysis: `/stock`, `/news`, `/chart`, `/compare`, `/watchlist`, `/macro`
+- **Candlestick charts** — dark-theme OHLCV + SMA 20/50/200 + RSI panel (CLI) and Plotly interactive (web)
+- **Web stock detail view** — click any stock in Rankings or use Stock Lookup tab for full per-stock analysis
+- **Optional free API keys** — Finnhub, NewsAPI, FRED for richer news and macro data
 
 ---
 
-## Streamlit Dashboard — 6 Tabs
+## Streamlit Dashboard — 7 Tabs
 
 | Tab | Contents |
 |-----|----------|
-| **Rankings** | Top-3 pick cards with signal + conviction badges; full rankings table; stacked factor bar chart |
+| **Rankings** | Top-3 pick cards; full rankings table; stacked factor bar chart; per-stock detail panel at bottom |
 | **Valuation** | 4-method valuation matrix; entry positioning chart (current price vs entry zone); method spread |
 | **Risk & Quality** | Risk metrics table; Sharpe vs ROIC/WACC bubble scatter; Piotroski F-Score bar chart |
 | **Protocol Gates** | 10×7 gate heatmap (Plotly, red→amber→green); protocol summary with pass/warn/fail indicators |
 | **Portfolio** | Donut allocation chart; position breakdown table with weight bars |
 | **Macro & Performance** | VIX + 10Y yield tiles; sector ETF returns bar; normalised price history vs S&P 500; correlation heatmap |
+| **Stock Lookup** | Search any ticker — full detail: candlestick chart, news feed, key financials, valuation, risk, 7-gate protocol |
 
 ---
 
-## What It Does (15-Step Pipeline)
+## What It Does (16-Step Pipeline)
 
 | Step | Action |
 |------|--------|
@@ -71,6 +77,7 @@ Opens at `http://localhost:8501` — white background, black text, 6 interactive
 | 13 | **7-Gate Protocol** — each stock must pass quality, moat, health, valuation, entry, news, trend |
 | 14 | **Deep analysis output** — full per-stock terminal report (valuation matrix, quality metrics, risk profile) |
 | 15 | 5 charts + Excel export + save session to memory |
+| 16 | **Interactive command loop** — `/stock`, `/news`, `/chart`, `/compare`, `/watchlist`, `/macro` |
 
 ---
 
@@ -308,13 +315,72 @@ The more sessions you run, the smarter the factor weights become.
 
 ---
 
+## CLI Slash Commands
+
+After the analysis runs, the terminal enters an interactive command loop.
+All data from the session is available — no re-fetching needed for stocks in the top 10.
+
+| Command | Description |
+|---------|-------------|
+| `/stock AAPL` | Full report: price, valuation (all 4 methods), risk metrics, 7-gate protocol, key financials |
+| `/news AAPL [15]` | Latest headlines with sentiment score + positive/negative/neutral colour coding |
+| `/chart AAPL [6mo]` | Dark-theme candlestick chart with SMA 20/50/200 overlays + RSI panel |
+| `/compare AAPL MSFT` | Side-by-side table: price, P/E, EV/EBITDA, Sharpe, Piotroski, valuation signal |
+| `/add AAPL` | Add ticker to persistent watchlist (`memory/watchlist.json`) |
+| `/remove AAPL` | Remove ticker from watchlist |
+| `/watchlist` | Display all watchlist tickers with key metrics |
+| `/macro` | VIX, 10Y yield, regime, sector ETF returns from session data |
+| `/exit` | Exit the command loop |
+
+Tickers not in the top 10 are fetched on-demand from Yahoo Finance.
+
+---
+
+## Candlestick Charts
+
+Both the CLI and the web dashboard include full candlestick charts with technical overlays.
+
+**CLI (`/chart TICKER [period]`):**
+- Built with `mplfinance` (dark market colours: green up, red down) with `matplotlib` fallback
+- 3 panels: price + SMA 20/50/200, volume bars, RSI(14) with overbought/oversold bands
+- Saved as `chart_{ticker}_{period}.png` or shown via `plt.show()`
+
+**Web (Stock Lookup tab + Rankings detail panel):**
+- Built with Plotly `go.Candlestick` — fully interactive (zoom, hover, range slider)
+- 3 rows via `make_subplots`: candlestick + SMAs, volume, RSI(14)
+- Period selector: 1mo / 3mo / 6mo / 1y / 2y
+
+---
+
+## Free News API Integrations
+
+News is aggregated from up to four sources — all free:
+
+| Source | Requires Key | Rate Limit | Notes |
+|--------|-------------|------------|-------|
+| Yahoo Finance (yfinance) | No | None | Always active; last 12 headlines |
+| Yahoo Finance RSS (feedparser) | No | None | Always active; last 10 from RSS |
+| Finnhub | Optional | 60 calls/min | Get free key at finnhub.io |
+| NewsAPI | Optional | 100 req/day | Get free key at newsapi.org |
+
+To enable optional sources, add your key to `config.py`:
+```python
+FINNHUB_KEY  = "your_key_here"
+NEWSAPI_KEY  = "your_key_here"
+FRED_KEY     = "your_key_here"   # macro data: CPI, FEDFUNDS, T10Y2Y, etc.
+```
+
+All keys are optional. The tool works fully without any of them.
+
+---
+
 ## File Structure
 
 ```
 portfolio/
-├── main.py                 ← CLI pipeline (15 steps)
+├── main.py                 ← CLI pipeline (16 steps) + interactive command loop
 ├── app.py                  ← Streamlit dashboard (streamlit run app.py)
-├── config.py               ← Universe, weight matrix, sector multiples
+├── config.py               ← Universe, weight matrix, sector multiples, optional API keys
 ├── requirements.txt        ← All dependencies
 ├── .streamlit/
 │   └── config.toml         ← Streamlit theme settings
@@ -327,11 +393,14 @@ portfolio/
 │   ├── risk.py             ← Altman Z · Sharpe · Sortino · ROIC/WACC · Piotroski
 │   ├── protocol.py         ← 7-gate Warren Buffett investment protocol
 │   ├── learner.py          ← Session memory + adaptive weight learning
-│   ├── charts.py           ← 5 dark-theme matplotlib charts (CLI)
+│   ├── news_fetcher.py     ← Multi-source news: yfinance + RSS + Finnhub + NewsAPI + FRED
+│   ├── cli_commands.py     ← Interactive slash command REPL (/stock /news /chart /compare ...)
+│   ├── charts.py           ← 5 dark-theme charts + candlestick() on-demand (CLI)
 │   ├── display.py          ← Terminal output + deep analysis (CLI)
 │   └── exporter.py         ← Excel export — 6 sheets (CLI)
 ├── memory/
-│   └── history.json        ← Auto-created, grows over time
+│   ├── history.json        ← Auto-created, grows over time
+│   └── watchlist.json      ← CLI /add watchlist (auto-created)
 ├── Book1.xlsx              ← Auto-generated on each CLI run
 ├── chart1_score_breakdown.png
 ├── chart2_performance.png
@@ -345,17 +414,20 @@ portfolio/
 ## Dependencies
 
 ```
-yfinance>=0.2.36    # free stock data
+yfinance>=0.2.36      # free stock data
 pandas>=2.0.0
 numpy>=1.24.0
-matplotlib>=3.7.0   # CLI charts
-rich>=13.0.0        # terminal formatting (CLI)
-openpyxl>=3.1.0     # Excel export (CLI)
-streamlit>=1.32.0   # web dashboard
-plotly>=5.18.0      # interactive dashboard charts
+matplotlib>=3.7.0     # CLI charts
+rich>=13.0.0          # terminal formatting (CLI)
+openpyxl>=3.1.0       # Excel export (CLI)
+streamlit>=1.32.0     # web dashboard
+plotly>=5.18.0        # interactive dashboard charts
+mplfinance>=0.12.9    # candlestick charts (CLI /chart command)
+feedparser>=6.0.0     # Yahoo Finance RSS news feed
+requests>=2.31.0      # Finnhub + NewsAPI + FRED HTTP calls
 ```
 
-No paid APIs. No API keys. No accounts required.
+No paid APIs required. All optional API keys default to empty — the tool works fully without them.
 
 ---
 

@@ -14,17 +14,18 @@ warnings.filterwarnings("ignore")
 
 from config import STOCK_UNIVERSE
 
-from advisor.collector  import InputCollector
-from advisor.fetcher    import DataFetcher, MacroFetcher
-from advisor.scorer     import MultiFactorScorer
-from advisor.portfolio  import PortfolioConstructor
-from advisor.learner    import SessionMemory
-from advisor.protocol   import ProtocolAnalyzer
-from advisor.valuation  import ValuationEngine
-from advisor.risk       import RiskEngine
-from advisor.charts     import ChartEngine
-from advisor.display    import TerminalDisplay
-from advisor.exporter   import ExcelExporter
+from advisor.collector    import InputCollector
+from advisor.fetcher      import DataFetcher, MacroFetcher
+from advisor.scorer       import MultiFactorScorer
+from advisor.portfolio    import PortfolioConstructor
+from advisor.learner      import SessionMemory
+from advisor.protocol     import ProtocolAnalyzer
+from advisor.valuation    import ValuationEngine
+from advisor.risk         import RiskEngine
+from advisor.charts       import ChartEngine
+from advisor.display      import TerminalDisplay
+from advisor.exporter     import ExcelExporter
+from advisor.cli_commands import CommandHandler
 
 
 def main():
@@ -149,6 +150,16 @@ def main():
         plt.show()
     except Exception:
         print("  (Open the chart PNG files to view visualisations.)\n")
+
+    # ── 16. Interactive command loop ──────────────────────────────────────────
+    CommandHandler(
+        universe_data     = universe_data,
+        valuation_results = valuation_results,
+        risk_results      = risk_results,
+        protocol_results  = protocol_results,
+        rf_rate           = rf_rate,
+        macro_data        = macro_data,
+    ).run()
 
 
 if __name__ == "__main__":

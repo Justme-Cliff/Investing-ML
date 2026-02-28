@@ -1,5 +1,15 @@
 # config.py — Global constants: stock universe, weights, macro tickers, word lists
 
+# ── Optional free API keys — tool works without them; they enhance data quality ─
+# Finnhub  : https://finnhub.io          (free — 60 calls/min)
+# NewsAPI  : https://newsapi.org         (free — 100 req/day)
+# FRED     : https://fred.stlouisfed.org (free — unlimited)
+# Alpha Vantage: https://alphavantage.co (free — 25 req/day)
+FINNHUB_KEY       = ""   # company news, insider trades, earnings calendar
+NEWSAPI_KEY       = ""   # broad financial news search
+FRED_KEY          = ""   # macro series: CPI, UNRATE, FEDFUNDS, T10Y2Y, etc.
+ALPHAVANTAGE_KEY  = ""   # earnings, income statement supplements
+
 # ── Macro / benchmark tickers (all free via yfinance) ──────────────────────────
 SP500_TICKER    = "^GSPC"
 VIX_TICKER      = "^VIX"

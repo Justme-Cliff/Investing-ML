@@ -6,3 +6,6 @@ rich>=13.0.0
 openpyxl>=3.1.0
 streamlit>=1.32.0
 plotly>=5.18.0
+mplfinance>=0.12.9
+feedparser>=6.0.0
+requests>=2.31.0
