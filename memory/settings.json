@@ -1,0 +1,7 @@
+{
+  "theme": "Light",
+  "fresh_penalty": 22,
+  "n_sessions": 2,
+  "learning_rate": 0.04,
+  "signal_mode": "Balanced"
+}

@@ -28,6 +28,11 @@ Opens at `http://localhost:8501` — white background, black text, 10 interactiv
 
 ## What's New (latest session)
 
+- **History auto-save fixed** — every web analysis run now automatically saves to `memory/history.json` (was broken; only CLI saved before)
+- **Portfolio size up to $1 billion** — sidebar input now accepts $1,000 – $1,000,000,000
+- **Settings page** — ⚙️ button in sidebar opens a full settings panel: theme switcher (Light/Warm/Cool/Mint), data export (Rankings CSV, Valuation CSV, Session History JSON), and behaviour sliders (fresh picks penalty, sessions to remember, adaptive learning rate, signal aggressiveness mode); settings persisted to `memory/settings.json`
+- **Calendar Wall Street analysis** — per-stock quant recommendation (STRONG BUY → AVOID) with Bear/Base/Bull price targets, trade road map (entry/target/stop/R:R), risk rating, portfolio sentiment overview
+- **History time machine** — "📊 Open Full Analysis" button reconstructs the full historical page with live P&L, score rankings bar chart, returns vs S&P 500, and 2-per-row pick cards
 - **Portfolio backtest** — backtests the entire 10-stock basket simultaneously; equal-weighted equity curve vs S&P 500 with individual stock lines; 5 aggregate metrics (return, win rate, buy-and-hold, S&P 500, alpha); per-stock breakdown table — no ticker selector needed
 - **Earnings Calendar tab** — dedicated tab 10 + sidebar button; shows all 10 picks sorted by urgency (≤7d RED / ≤14d AMBER / ≤30d BLUE / >30d GRAY); hero countdown banner for nearest earnings; horizontal timeline chart; valuation signal + price vs FV on each card; earnings risk guidance
 - **History full analysis** — each session now expands into the complete picture: full profile header with exact timestamp, per-pick cards showing all 7 factor score bars, entry price, exit price + P&L (for evaluated sessions); pending sessions show an amber evaluation countdown
@@ -57,9 +62,10 @@ Opens at `http://localhost:8501` — white background, black text, 10 interactiv
 | **Portfolio** | Donut allocation chart; position breakdown table with weight bars |
 | **Macro & Performance** | VIX + 10Y yield tiles; sector ETF returns; normalised price history vs S&P 500; correlation heatmap |
 | **Stock Lookup** | Search any ticker — full quant detail: candlestick chart, news, valuation, risk, protocol, analyst targets, technical status |
-| **History** | Per-session expanders showing full pick cards with all 7 factor bars, entry price, exit P&L; aggregate win rate / alpha tiles |
+| **History** | Per-session expanders + "📊 Open Full Analysis" time-machine view; full pick cards with 7 factor bars, entry price, exit P&L; aggregate win rate / alpha tiles |
 | **Backtest** | Portfolio-wide backtest: all 10 picks simultaneously; equal-weighted equity curve vs S&P 500; 5 aggregate tiles; per-stock breakdown table |
-| **Calendar** | Earnings timeline for all 10 picks sorted by urgency; hero countdown banner; horizontal bar chart; valuation signal on each card; event-risk guidance |
+| **Calendar** | Earnings timeline for all 10 picks sorted by urgency; Wall Street-style quant recommendation per stock (STRONG BUY→AVOID); Bear/Base/Bull price targets; trade road map |
+| **Settings** _(sidebar)_ | Theme switcher (Light/Warm/Cool/Mint); data export (Rankings CSV, Valuation CSV, History JSON); behaviour sliders (penalty, memory, learning rate, signal mode) |
 
 ---
 

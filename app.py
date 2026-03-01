@@ -868,6 +868,22 @@ def run_analysis(profile: UserProfile) -> dict:
     )
     prog.progress(100, text="Done.")
     prog.empty()
+
+    # ── Persist session to history ─────────────────────────────────────────
+    try:
+        sp500_h = res.get("sp500_hist")
+        if sp500_h is not None and len(sp500_h) > 0:
+            if isinstance(sp500_h.columns, pd.MultiIndex):
+                sp500_h = sp500_h.copy()
+                sp500_h.columns = sp500_h.columns.get_level_values(0)
+            sp500_price = float(sp500_h["Close"].iloc[-1])
+        else:
+            sp500_price = 0.0
+        memory.save_session(profile, res["top10"], sp500_price)
+        memory.save()
+    except Exception as _mem_err:
+        pass   # never block the UI over a save failure
+
     return res
 
 
@@ -886,8 +902,8 @@ def render_sidebar():
 
         portfolio_size = st.number_input(
             "Portfolio Size ($)",
-            min_value=1_000, max_value=100_000_000,
-            value=50_000, step=1_000, format="%d",
+            min_value=1_000, max_value=1_000_000_000,
+            value=50_000, step=10_000, format="%d",
         )
         time_horizon_key = st.selectbox(
             "Time Horizon",
