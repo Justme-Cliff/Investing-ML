@@ -8,6 +8,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 import os
+import json
 import streamlit as st
 
 st.set_page_config(
@@ -91,6 +92,67 @@ ZONE_META = {
     "GRAY":     (AMBER, AMBER_LT),
     "DISTRESS": (RED,   RED_LT),
 }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SETTINGS — persistence + theme injection
+# ─────────────────────────────────────────────────────────────────────────────
+SETTINGS_FILE = os.path.join("memory", "settings.json")
+
+THEMES = {
+    "Light":  {"bg": "#FFFFFF", "sidebar": "#FFFFFF", "accent": "#2563EB"},
+    "Warm":   {"bg": "#FFFBF5", "sidebar": "#FFF3E0", "accent": "#D97706"},
+    "Cool":   {"bg": "#F0F4FF", "sidebar": "#EEF2FF", "accent": "#6366F1"},
+    "Mint":   {"bg": "#F0FDF4", "sidebar": "#DCFCE7", "accent": "#059669"},
+}
+
+DEFAULT_SETTINGS = {
+    "theme":          "Light",
+    "fresh_penalty":  22,
+    "n_sessions":     2,
+    "learning_rate":  0.04,
+    "signal_mode":    "Balanced",
+}
+
+
+def _load_settings() -> dict:
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE) as f:
+                data = json.load(f)
+            return {**DEFAULT_SETTINGS, **data}
+    except Exception:
+        pass
+    return dict(DEFAULT_SETTINGS)
+
+
+def _save_settings(s: dict):
+    os.makedirs("memory", exist_ok=True)
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(s, f, indent=2)
+    except Exception:
+        pass
+
+
+def _apply_theme_css():
+    """Inject per-session CSS overrides based on active theme."""
+    s      = st.session_state.get("settings", DEFAULT_SETTINGS)
+    t      = THEMES.get(s.get("theme", "Light"), THEMES["Light"])
+    bg     = t["bg"]
+    sb     = t["sidebar"]
+    accent = t["accent"]
+    st.markdown(
+        f"<style>"
+        f".main,.main .block-container{{background-color:{bg}!important}}"
+        f"[data-testid='stSidebar']{{background:{sb}!important}}"
+        f".stTabs [aria-selected='true']{{border-bottom-color:{accent}!important}}"
+        f".stButton>button[kind='primary']{{background:{accent}!important;"
+        f"border-color:{accent}!important}}"
+        f".stButton>button[kind='primary']:hover{{opacity:.88}}"
+        f"</style>",
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -773,11 +835,14 @@ def run_analysis(profile: UserProfile) -> dict:
     scorer  = MultiFactorScorer(profile, res["macro_data"], adapted)
     ranked_df = scorer.score_all(res["universe_data"])
 
-    # Fresh picks mode: penalise tickers from last 2 sessions
+    # Fresh picks mode: penalise tickers from recent sessions
     if profile.avoid_recent:
-        recent_tickers = memory.get_recent_tickers(n_sessions=2)
+        _cfg           = st.session_state.get("settings", DEFAULT_SETTINGS)
+        _n_sess        = int(_cfg.get("n_sessions", 2))
+        _penalty       = float(_cfg.get("fresh_penalty", 22))
+        recent_tickers = memory.get_recent_tickers(n_sessions=_n_sess)
         if recent_tickers:
-            PENALTY = 22.0
+            PENALTY = _penalty
             mask = ranked_df["ticker"].isin(recent_tickers)
             ranked_df.loc[mask, "composite_score"] = (
                 ranked_df.loc[mask, "composite_score"] - PENALTY
@@ -866,11 +931,14 @@ def render_sidebar():
 
         st.divider()
         run_btn   = st.button("Run Analysis",   type="primary",    use_container_width=True)
-        col_b1, col_b2 = st.columns(2)
+        col_b1, col_b2, col_b3 = st.columns(3)
         with col_b1:
-            hist_btn = st.button("Past Sessions", type="secondary", use_container_width=True)
+            hist_btn = st.button("History",  type="secondary", use_container_width=True)
         with col_b2:
-            bt_btn   = st.button("Backtest",      type="secondary", use_container_width=True)
+            bt_btn   = st.button("Backtest", type="secondary", use_container_width=True)
+        with col_b3:
+            cal_btn  = st.button("Calendar", type="secondary", use_container_width=True)
+        settings_btn = st.button("⚙️  Settings", type="secondary", use_container_width=True)
 
     profile = UserProfile(
         portfolio_size    = float(portfolio_size),
@@ -887,7 +955,7 @@ def render_sidebar():
         existing_tickers  = existing_tickers,
         avoid_recent      = avoid_recent,
     )
-    return profile, run_btn, hist_btn, bt_btn
+    return profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2520,6 +2588,23 @@ def tab_stock_lookup(universe_data, valuation, risk, protocol, rf_rate):
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 9 — BACKTEST
 # ─────────────────────────────────────────────────────────────────────────────
+def _normalize_yf(df) -> "pd.DataFrame":
+    """
+    yfinance ≥0.2.31 returns MultiIndex columns from yf.download()
+    e.g. ('Close', 'AAPL').  Flatten to single-level so code using
+    df['Close'] keeps working.  No-op if already single-level.
+    """
+    if df is None or df.empty:
+        return df
+    if isinstance(df.columns, pd.MultiIndex):
+        # Drop the ticker level — keep only the field name
+        df = df.copy()
+        df.columns = df.columns.get_level_values(0)
+        # If duplicate column names remain (multi-ticker download), de-dup
+        df = df.loc[:, ~df.columns.duplicated()]
+    return df
+
+
 def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: float, stop: float) -> list:
     """
     Simulate the valuation entry strategy on historical prices.
@@ -2532,7 +2617,8 @@ def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: flo
     entry_price = None
     entry_date  = None
 
-    prices = hist["Close"].dropna()
+    hist = _normalize_yf(hist)
+    prices = hist["Close"].squeeze().dropna()
     for date, price in prices.items():
         price = float(price)
         if not in_trade:
@@ -2584,92 +2670,172 @@ def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: flo
     return trades
 
 
-def tab_backtest(universe_data: dict, valuation: dict, risk: dict, rf_rate: float):
+def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rate: float):
+    """Portfolio-wide backtest: simulate valuation entry strategy on all 10 picks vs S&P 500."""
+    import yfinance as yf
+
     st.markdown(
-        shdr("Backtest", "Simulate our valuation entry strategy on historical price data"),
+        shdr("Portfolio Backtest", "Simulate our valuation entry strategy on the full 10-stock basket vs S&P 500"),
         unsafe_allow_html=True,
     )
 
-    # ── Controls ─────────────────────────────────────────────────────────────
-    all_tickers = sorted(set(list(universe_data.keys()) + list(valuation.keys())))
-    col_t, col_p, col_run = st.columns([3, 1, 1])
-    with col_t:
-        bt_ticker = st.selectbox("Select ticker to backtest", all_tickers,
-                                 label_visibility="collapsed",
-                                 placeholder="Choose a ticker…")
+    if top10 is None or (hasattr(top10, "__len__") and len(top10) == 0):
+        st.markdown(
+            f'<div style="text-align:center;padding:80px 20px;color:{MUTED2};font-size:15px">'
+            f'Run the analysis first — the backtest will simulate <b>all 10 picks</b> automatically.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    # ── Period selector + Run button ─────────────────────────────────────────
+    col_p, col_run = st.columns([2, 1])
     with col_p:
-        bt_period = st.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1,
-                                 label_visibility="collapsed")
+        bt_period = st.selectbox(
+            "Backtest Period", ["1y", "2y", "3y", "5y"], index=1,
+            help="How far back to simulate the strategy",
+        )
     with col_run:
-        go_btn = st.button("Run Backtest", type="primary", use_container_width=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+        go_btn = st.button("Run Portfolio Backtest", type="primary", use_container_width=True)
 
     if "bt_result" not in st.session_state:
-        st.session_state.bt_result  = None
-        st.session_state.bt_ticker  = None
-        st.session_state.bt_period  = None
+        st.session_state.bt_result = None
+        st.session_state.bt_period = None
 
-    if go_btn and bt_ticker:
-        st.session_state.bt_ticker = bt_ticker
+    if go_btn:
         st.session_state.bt_period = bt_period
+        st.session_state.bt_errors = {}
+        tickers = list(top10["ticker"]) if hasattr(top10, "iterrows") else list(top10)
 
-        # Get or fetch historical data
-        if bt_ticker in universe_data and universe_data[bt_ticker].get("history") is not None:
-            hist_raw = universe_data[bt_ticker]["history"]
-        else:
-            with st.spinner(f"Fetching {bt_ticker} price history…"):
-                import yfinance as yf
-                hist_raw = yf.download(bt_ticker, period=bt_period, progress=False, auto_adjust=True)
+        prog = st.progress(0, text="Fetching S&P 500 benchmark…")
 
-        # Get valuation for entry/target/stop
-        val_r = valuation.get(bt_ticker, {})
-        if not val_r:
-            # Run valuation on the fly
-            with st.spinner("Running valuation…"):
-                d = universe_data.get(bt_ticker, {})
-                if d:
-                    df_tmp = pd.DataFrame([{"ticker": bt_ticker,
-                                            "sector": d.get("sector","Unknown"),
-                                            "composite_score": 0}])
-                    val_r = ValuationEngine(rf_rate).analyze_all(df_tmp, universe_data).get(bt_ticker, {})
+        # Fetch S&P 500
+        try:
+            sp_hist   = _normalize_yf(yf.download("^GSPC", period=bt_period, progress=False, auto_adjust=True))
+            sp_closes = sp_hist["Close"].squeeze()
+            if hasattr(sp_closes.index, "tz") and sp_closes.index.tz is not None:
+                sp_closes.index = sp_closes.index.tz_localize(None)
+            sp500_total_ret = (float(sp_closes.iloc[-1]) / float(sp_closes.iloc[0]) - 1) * 100
+            sp_equity = (sp_closes / float(sp_closes.iloc[0]) * 100).reset_index()
+            sp_equity.columns = ["Date", "Equity"]
+        except Exception:
+            sp_hist = None; sp500_total_ret = None; sp_equity = None
 
-        entry_low = val_r.get("entry_low")
-        target    = val_r.get("target_price")
-        stop_loss = val_r.get("stop_loss")
-        fair_val  = val_r.get("fair_value")
+        stock_results = {}
+        equity_curves = {}   # ticker -> pd.Series (indexed by date, value = equity %)
 
-        if hist_raw is not None and not hist_raw.empty and entry_low and target and stop_loss:
-            trades = _run_backtest_simulation(hist_raw, entry_low, target, stop_loss)
-
-            # Fetch S&P500 for comparison
+        for i, t in enumerate(tickers):
+            prog.progress((i + 1) / len(tickers), text=f"Backtesting {t}…")
             try:
-                import yfinance as yf
-                sp_hist = yf.download("^GSPC", period=bt_period, progress=False, auto_adjust=True)
-                sp500_ret = (float(sp_hist["Close"].iloc[-1]) / float(sp_hist["Close"].iloc[0]) - 1) * 100 if not sp_hist.empty else None
-            except Exception:
-                sp500_ret = None
+                # Get historical data
+                d = universe_data.get(t, {})
+                if d.get("history") is not None and not d["history"].empty and bt_period == "1y":
+                    # Use cached 1-year history directly (already single-level columns)
+                    hist_raw = d["history"]
+                else:
+                    # Download extended history; normalize MultiIndex columns
+                    hist_raw = _normalize_yf(
+                        yf.download(t, period=bt_period, progress=False, auto_adjust=True)
+                    )
 
-            bah_ret = (float(hist_raw["Close"].iloc[-1]) / float(hist_raw["Close"].iloc[0]) - 1) * 100
+                if hist_raw is None or hist_raw.empty:
+                    continue
+
+                hist_plot = _normalize_yf(hist_raw.copy())
+                if hasattr(hist_plot.index, "tz") and hist_plot.index.tz is not None:
+                    hist_plot.index = hist_plot.index.tz_localize(None)
+                closes = hist_plot["Close"].squeeze().dropna()
+
+                # Build buy-and-hold equity curve
+                eq_curve = (closes / float(closes.iloc[0]) * 100)
+                equity_curves[t] = eq_curve
+
+                # Valuation levels
+                val_r = valuation.get(t, {})
+                entry_low = val_r.get("entry_low")
+                target    = val_r.get("target_price")
+                stop_loss = val_r.get("stop_loss")
+                fair_val  = val_r.get("fair_value")
+
+                bah_ret = (float(closes.iloc[-1]) / float(closes.iloc[0]) - 1) * 100
+
+                if entry_low and target and stop_loss:
+                    trades = _run_backtest_simulation(hist_raw, entry_low, target, stop_loss)
+                    closed = [tr for tr in trades if tr["reason"] != "Open position"]
+                    open_p = next((tr for tr in trades if tr["reason"] == "Open position"), None)
+                    n_wins = sum(1 for tr in trades if tr["won"])
+                    compound = 1.0
+                    for tr in closed:
+                        compound *= (1 + tr["return_pct"] / 100)
+                    strat_ret = (compound - 1) * 100 if closed else (open_p["return_pct"] if open_p else bah_ret)
+                    win_rate = (n_wins / len(trades) * 100) if trades else 0
+                else:
+                    trades = []; strat_ret = bah_ret; win_rate = 0
+                    entry_low = target = stop_loss = fair_val = None
+
+                stock_results[t] = {
+                    "ticker":    t,
+                    "trades":    trades,
+                    "strat_ret": strat_ret,
+                    "bah_ret":   bah_ret,
+                    "win_rate":  win_rate,
+                    "n_trades":  len(trades),
+                    "entry_low": entry_low,
+                    "target":    target,
+                    "stop_loss": stop_loss,
+                    "fair_val":  fair_val,
+                    "hist":      hist_raw,
+                }
+            except Exception as _bt_err:
+                # Store error for debugging but keep going with remaining tickers
+                if "bt_errors" not in st.session_state:
+                    st.session_state.bt_errors = {}
+                st.session_state.bt_errors[t] = str(_bt_err)
+                continue
+
+        prog.empty()
+
+        if not stock_results:
+            err_detail = ""
+            if st.session_state.get("bt_errors"):
+                sample = list(st.session_state.bt_errors.items())[:3]
+                err_detail = " Errors: " + "; ".join(f"{k}: {v}" for k, v in sample)
+            st.session_state.bt_result = {"error": f"Could not fetch price data for any stock.{err_detail}"}
+        else:
+            # Portfolio aggregate: equal-weight strategy returns
+            strat_rets  = [v["strat_ret"]  for v in stock_results.values()]
+            bah_rets    = [v["bah_ret"]    for v in stock_results.values()]
+            port_return = sum(strat_rets) / len(strat_rets)
+            port_bah    = sum(bah_rets)   / len(bah_rets)
+            total_trades = sum(v["n_trades"] for v in stock_results.values())
+            total_wins   = sum(
+                sum(1 for tr in v["trades"] if tr["won"]) for v in stock_results.values()
+            )
+            port_win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
+
+            # Alpha
+            alpha = port_return - (sp500_total_ret or port_bah)
 
             st.session_state.bt_result = {
-                "trades":      trades,
-                "hist":        hist_raw,
-                "val":         val_r,
-                "entry_low":   entry_low,
-                "target":      target,
-                "stop_loss":   stop_loss,
-                "fair_value":  fair_val,
-                "bah_ret":     bah_ret,
-                "sp500_ret":   sp500_ret,
+                "stock_results":  stock_results,
+                "equity_curves":  equity_curves,
+                "port_return":    port_return,
+                "port_bah":       port_bah,
+                "port_win_rate":  port_win_rate,
+                "total_trades":   total_trades,
+                "total_wins":     total_wins,
+                "alpha":          alpha,
+                "sp500_ret":      sp500_total_ret,
+                "sp_equity":      sp_equity,
+                "period":         bt_period,
             }
-        else:
-            st.session_state.bt_result = {"error": "Insufficient valuation data or price history."}
 
     # ── Results ───────────────────────────────────────────────────────────────
     bt = st.session_state.bt_result
     if not bt:
         st.markdown(
             f'<div style="text-align:center;padding:60px 20px;color:{MUTED2};font-size:14px">'
-            f'Select a ticker and click Run Backtest to simulate our valuation entry strategy.</div>',
+            f'Select a period and click <b>Run Portfolio Backtest</b> to simulate all 10 picks.</div>',
             unsafe_allow_html=True,
         )
         return
@@ -2678,32 +2844,21 @@ def tab_backtest(universe_data: dict, valuation: dict, risk: dict, rf_rate: floa
         st.error(bt["error"])
         return
 
-    trades    = bt["trades"]
-    hist      = bt["hist"]
-    entry_low = bt["entry_low"]
-    target    = bt["target"]
-    stop_loss = bt["stop_loss"]
-    fair_val  = bt["fair_value"]
-    bah_ret   = bt["bah_ret"]
-    sp500_ret = bt.get("sp500_ret")
-    t_name    = st.session_state.bt_ticker
-
-    # ── Strategy metrics ──────────────────────────────────────────────────────
-    n_trades  = len(trades)
-    n_wins    = sum(1 for t in trades if t["won"])
-    win_rate  = (n_wins / n_trades * 100) if n_trades > 0 else 0
-    open_pos  = next((t for t in trades if t["reason"] == "Open position"), None)
-    closed    = [t for t in trades if t["reason"] != "Open position"]
-
-    # Compound return across closed trades
-    compound = 1.0
-    for t in closed:
-        compound *= (1 + t["return_pct"] / 100)
-    total_return = (compound - 1) * 100 if closed else (open_pos["return_pct"] if open_pos else 0)
+    port_return   = bt["port_return"]
+    port_bah      = bt["port_bah"]
+    port_win_rate = bt["port_win_rate"]
+    total_trades  = bt["total_trades"]
+    total_wins    = bt["total_wins"]
+    alpha         = bt["alpha"]
+    sp500_ret     = bt.get("sp500_ret")
+    equity_curves = bt["equity_curves"]
+    sp_equity     = bt.get("sp_equity")
+    stock_results = bt["stock_results"]
+    period        = bt.get("period", bt_period)
 
     # ── Summary tiles ─────────────────────────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    cols_m = st.columns(5)
+
     def _bt_tile(label, value, sub, color):
         return (
             f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
@@ -2716,120 +2871,595 @@ def tab_backtest(universe_data: dict, valuation: dict, risk: dict, rf_rate: floa
             f'</div>'
         )
 
-    ret_color  = GREEN if total_return > 0 else RED
-    wr_color   = GREEN if win_rate >= 60 else RED if win_rate < 40 else AMBER
-    bah_color  = GREEN if bah_ret > 0 else RED
-    sp_color   = GREEN if (sp500_ret or 0) > 0 else RED
-    alpha_val  = total_return - (sp500_ret or 0)
-    alpha_clr  = GREEN if alpha_val > 0 else RED
+    cols_m = st.columns(5)
+    ret_c  = GREEN if port_return > 0 else RED
+    wr_c   = GREEN if port_win_rate >= 60 else RED if port_win_rate < 40 else AMBER
+    bah_c  = GREEN if port_bah > 0 else RED
+    sp_c   = GREEN if (sp500_ret or 0) > 0 else RED
+    al_c   = GREEN if alpha > 0 else RED
+    sp_str = f"{sp500_ret:+.1f}%" if sp500_ret is not None else "n/a"
 
-    with cols_m[0]: st.markdown(_bt_tile("Strategy Return", f"{total_return:+.1f}%", f"{len(closed)} closed trades", ret_color), unsafe_allow_html=True)
-    with cols_m[1]: st.markdown(_bt_tile("Win Rate", f"{win_rate:.0f}%", f"{n_wins}W / {n_trades-n_wins}L", wr_color), unsafe_allow_html=True)
-    with cols_m[2]: st.markdown(_bt_tile("Buy & Hold", f"{bah_ret:+.1f}%", "same period", bah_color), unsafe_allow_html=True)
-    with cols_m[3]: st.markdown(_bt_tile("S&P 500", f"{sp500_ret:+.1f}%" if sp500_ret is not None else "—", "same period", sp_color), unsafe_allow_html=True)
-    with cols_m[4]: st.markdown(_bt_tile("Alpha vs S&P", f"{alpha_val:+.1f}%" if sp500_ret is not None else "—", "strategy − benchmark", alpha_clr), unsafe_allow_html=True)
+    with cols_m[0]: st.markdown(_bt_tile("Portfolio Return", f"{port_return:+.1f}%", f"equal-weight · {period}", ret_c), unsafe_allow_html=True)
+    with cols_m[1]: st.markdown(_bt_tile("Win Rate", f"{port_win_rate:.0f}%", f"{total_wins}W / {total_trades-total_wins}L trades", wr_c), unsafe_allow_html=True)
+    with cols_m[2]: st.markdown(_bt_tile("Buy & Hold", f"{port_bah:+.1f}%", "equal-weight same stocks", bah_c), unsafe_allow_html=True)
+    with cols_m[3]: st.markdown(_bt_tile("S&P 500", sp_str, "benchmark same period", sp_c), unsafe_allow_html=True)
+    with cols_m[4]: st.markdown(_bt_tile("Alpha vs S&P", f"{alpha:+.1f}%", "portfolio − S&P 500", al_c), unsafe_allow_html=True)
 
-    # ── Chart ─────────────────────────────────────────────────────────────────
+    # ── Portfolio Equity Curve vs S&P 500 ─────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(shdr("Price History with Entry / Exit Points"), unsafe_allow_html=True)
+    st.markdown(shdr("Portfolio Equity Curve vs S&P 500", "Equal-weighted basket — base 100"), unsafe_allow_html=True)
 
     try:
-        hist_plot = hist.copy()
-        if hasattr(hist_plot.index, "tz") and hist_plot.index.tz is not None:
-            hist_plot.index = hist_plot.index.tz_localize(None)
-
-        closes = hist_plot["Close"].squeeze()
-
         fig = go.Figure()
-        # Price line
-        fig.add_trace(go.Scatter(x=closes.index, y=closes.values,
-                                 name=t_name, line=dict(color=BLUE, width=2),
-                                 hovertemplate="%{x}<br>$%{y:,.2f}<extra></extra>"))
 
-        # Shaded zones
-        fig.add_hrect(y0=0, y1=entry_low, fillcolor=GREEN, opacity=0.05,
-                      layer="below", line_width=0, annotation_text="Buy zone",
-                      annotation_position="left")
-        if fair_val:
-            fig.add_hrect(y0=entry_low, y1=fair_val, fillcolor=AMBER, opacity=0.04,
-                          layer="below", line_width=0)
-        fig.add_hline(y=target,    line_color=GREEN, line_dash="dash", line_width=1.5,
-                      annotation_text=f"Target ${target:,.2f}", annotation_position="right")
-        fig.add_hline(y=entry_low, line_color=BLUE,  line_dash="dot",  line_width=1.5,
-                      annotation_text=f"Entry ${entry_low:,.2f}", annotation_position="right")
-        fig.add_hline(y=stop_loss, line_color=RED,   line_dash="dash", line_width=1.5,
-                      annotation_text=f"Stop ${stop_loss:,.2f}", annotation_position="right")
-        if fair_val:
-            fig.add_hline(y=fair_val, line_color=AMBER, line_dash="dot", line_width=1,
-                          annotation_text=f"Fair Value ${fair_val:,.2f}", annotation_position="right")
+        # Individual stock equity curves (faint)
+        _STOCK_COLORS = [
+            "#93C5FD","#6EE7B7","#FCD34D","#F9A8D4","#C4B5FD",
+            "#A5F3FC","#FCA5A5","#86EFAC","#FDE68A","#BAE6FD",
+        ]
+        for idx, (t, eq) in enumerate(equity_curves.items()):
+            fig.add_trace(go.Scatter(
+                x=list(eq.index), y=list(eq.values),
+                name=t, mode="lines",
+                line=dict(color=_STOCK_COLORS[idx % len(_STOCK_COLORS)], width=1),
+                opacity=0.45,
+                hovertemplate=f"{t} %{{x}}<br>%{{y:.1f}}<extra></extra>",
+            ))
 
-        # Entry / exit markers
-        for tr in trades:
-            try:
-                fig.add_trace(go.Scatter(
-                    x=[tr["entry_date"]], y=[tr["entry"]],
-                    mode="markers", marker=dict(symbol="triangle-up", size=12, color=GREEN),
-                    name="Entry", showlegend=False,
-                    hovertemplate=f"BUY {tr['entry_date']}<br>${tr['entry']:,.2f}<extra></extra>",
-                ))
-                exit_color = GREEN if tr["won"] else RED
-                exit_sym   = "circle" if tr["reason"] != "Open position" else "circle-open"
-                fig.add_trace(go.Scatter(
-                    x=[tr["exit_date"]], y=[tr["exit"]],
-                    mode="markers", marker=dict(symbol=exit_sym, size=10, color=exit_color),
-                    name=tr["reason"], showlegend=False,
-                    hovertemplate=f"{tr['reason']} {tr['exit_date']}<br>${tr['exit']:,.2f} ({tr['return_pct']:+.1f}%)<extra></extra>",
-                ))
-            except Exception:
-                pass
+        # Portfolio average (thick green)
+        if equity_curves:
+            all_eq = pd.concat(list(equity_curves.values()), axis=1)
+            all_eq.columns = list(equity_curves.keys())
+            all_eq = all_eq.ffill().dropna(how="all")
+            port_eq = all_eq.mean(axis=1)
+            fig.add_trace(go.Scatter(
+                x=list(port_eq.index), y=list(port_eq.values),
+                name="Portfolio (equal-weight)", mode="lines",
+                line=dict(color=GREEN, width=3),
+                hovertemplate="Portfolio %{x}<br>%{y:.1f}<extra></extra>",
+            ))
 
+        # S&P 500 (blue)
+        if sp_equity is not None:
+            fig.add_trace(go.Scatter(
+                x=list(sp_equity["Date"]), y=list(sp_equity["Equity"]),
+                name="S&P 500", mode="lines",
+                line=dict(color=BLUE, width=2, dash="dot"),
+                hovertemplate="S&P 500 %{x}<br>%{y:.1f}<extra></extra>",
+            ))
+
+        fig.add_hline(y=100, line_color=BORDER, line_dash="solid", line_width=1)
         fig.update_layout(
             **_plotly_base(),
-            height=420,
-            showlegend=False,
-            margin=dict(l=40, r=120, t=30, b=40),
+            height=460,
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(l=40, r=40, t=60, b=40),
             xaxis=dict(showgrid=False, zeroline=False),
-            yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False, tickprefix="$"),
+            yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False,
+                       title="Equity (base 100)", ticksuffix=""),
         )
         st.plotly_chart(fig, use_container_width=True)
-    except Exception as e:
-        st.warning(f"Chart error: {e}")
+    except Exception as _e:
+        st.warning(f"Chart error: {_e}")
 
-    # ── Trade log ─────────────────────────────────────────────────────────────
-    if trades:
-        st.markdown(shdr("Trade Log"), unsafe_allow_html=True)
-        trade_rows = ""
-        for tr in trades:
-            ret_c  = GREEN if tr["won"] else RED
-            rsnbg  = "#ECFDF5" if tr["reason"] == "Target hit" else "#FEF2F2" if tr["reason"] == "Stop loss" else AMBER_LT
-            rsnc   = GREEN if tr["reason"] == "Target hit" else RED if tr["reason"] == "Stop loss" else AMBER
-            trade_rows += (
-                f'<tr>'
-                f'<td style="padding:8px 14px;font-size:12.5px">{tr["entry_date"]}</td>'
-                f'<td style="font-family:monospace;padding:8px 14px">${tr["entry"]:,.2f}</td>'
-                f'<td style="padding:8px 14px;font-size:12.5px">{tr["exit_date"]}</td>'
-                f'<td style="font-family:monospace;padding:8px 14px">${tr["exit"]:,.2f}</td>'
-                f'<td style="font-family:monospace;font-weight:700;color:{ret_c};padding:8px 14px">{tr["return_pct"]:+.2f}%</td>'
-                f'<td style="padding:8px 14px"><span class="badge" style="color:{rsnc};background:{rsnbg}">{tr["reason"]}</span></td>'
-                f'</tr>'
-            )
-        st.markdown(
-            f'<table class="qt"><thead><tr>'
-            f'<th>Entry Date</th><th>Entry $</th><th>Exit Date</th><th>Exit $</th>'
-            f'<th>Return</th><th>Reason</th>'
-            f'</tr></thead><tbody>{trade_rows}</tbody></table>',
-            unsafe_allow_html=True,
+    # ── Per-stock breakdown table ──────────────────────────────────────────────
+    st.markdown(shdr("Per-Stock Breakdown"), unsafe_allow_html=True)
+
+    tbl_rows = ""
+    for t, sr in sorted(stock_results.items(), key=lambda x: x[1]["strat_ret"], reverse=True):
+        rc  = GREEN if sr["strat_ret"] > 0 else RED
+        bc  = GREEN if sr["bah_ret"]   > 0 else RED
+        wrc = GREEN if sr["win_rate"] >= 60 else RED if sr["win_rate"] < 40 else AMBER
+        al2 = sr["strat_ret"] - (sp500_ret or sr["bah_ret"])
+        alc = GREEN if al2 > 0 else RED
+        tbl_rows += (
+            f'<tr>'
+            f'<td style="padding:9px 14px;font-weight:700">{t}</td>'
+            f'<td style="font-family:monospace;color:{rc};font-weight:700;padding:9px 14px">{sr["strat_ret"]:+.1f}%</td>'
+            f'<td style="font-family:monospace;color:{bc};padding:9px 14px">{sr["bah_ret"]:+.1f}%</td>'
+            f'<td style="font-family:monospace;color:{alc};padding:9px 14px">{al2:+.1f}%</td>'
+            f'<td style="font-family:monospace;color:{wrc};padding:9px 14px">{sr["win_rate"]:.0f}%</td>'
+            f'<td style="font-family:monospace;padding:9px 14px">{sr["n_trades"]}</td>'
+            f'<td style="font-family:monospace;padding:9px 14px">{fmt_price(sr["entry_low"])}</td>'
+            f'<td style="font-family:monospace;padding:9px 14px">{fmt_price(sr["target"])}</td>'
+            f'<td style="font-family:monospace;padding:9px 14px">{fmt_price(sr["stop_loss"])}</td>'
+            f'</tr>'
         )
+    st.markdown(
+        f'<table class="qt"><thead><tr>'
+        f'<th>Ticker</th><th>Strategy Ret</th><th>Buy&Hold</th><th>Alpha</th>'
+        f'<th>Win Rate</th><th>Trades</th><th>Entry Zone</th><th>Target</th><th>Stop</th>'
+        f'</tr></thead><tbody>{tbl_rows}</tbody></table>',
+        unsafe_allow_html=True,
+    )
 
-    # ── Strategy info ─────────────────────────────────────────────────────────
+    # ── Strategy rules note ───────────────────────────────────────────────────
     st.markdown(
         f'<div style="margin-top:20px;padding:14px 18px;background:{GRAY_LT};'
         f'border-radius:8px;border:1px solid {BORDER};font-size:12px;color:{MUTED}">'
-        f'<b>Strategy rules:</b> Enter when price ≤ entry zone (${entry_low:,.2f} — '
-        f'fair value × 0.80 with 20% margin of safety). '
-        f'Take profit at target (${target:,.2f} — fair value × 1.20). '
-        f'Cut loss at stop (${stop_loss:,.2f} — entry × 0.92). '
-        f'Based on current fundamental valuation — historical fundamentals vary.'
+        f'<b>Strategy rules:</b> Enter when price ≤ entry zone (fair value × 0.80, 20% margin of safety). '
+        f'Take profit at target (fair value × 1.20). Cut loss at stop (entry × 0.92). '
+        f'Portfolio is equal-weighted across all {len(stock_results)} picks. '
+        f'Based on current fundamental valuation — historical fundamentals vary. Treat as illustrative.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 10 — EARNINGS CALENDAR
+# ─────────────────────────────────────────────────────────────────────────────
+def _safe_dict(v):
+    """Return v if it's a dict, else {}. Guards against floats/None stored where dicts are expected."""
+    return v if isinstance(v, dict) else {}
+
+
+def _calendar_quant_analysis(t, val_r, risk_r, info, tech, days_to_earnings, score):
+    """
+    Generate Wall Street-style directional analysis from pure quant data.
+    Returns a dict with recommendation, price targets, entry, risk rating, thesis.
+    """
+    # Normalize all inputs — any could be a float/None if yfinance data is incomplete
+    val_r  = _safe_dict(val_r)
+    risk_r = _safe_dict(risk_r)
+    info   = _safe_dict(info)
+    tech   = _safe_dict(tech)
+
+    price  = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+    fv     = val_r.get("fair_value")
+    entry  = val_r.get("entry_low")
+    target = val_r.get("target_price")
+    stop   = val_r.get("stop_loss")
+    signal = val_r.get("signal", "")
+    premium= val_r.get("premium_pct") or (((price / fv - 1) * 100) if fv and price else 0)
+    upside = val_r.get("upside_pct") or (((target / price - 1) * 100) if target and price else 0)
+    rr     = val_r.get("rr_ratio")
+
+    # ── Bear / Base / Bull targets from DCF sensitivity ──────────────────────
+    sens    = _safe_dict(val_r.get("sensitivity"))
+    bear_fv = _safe_dict(sens.get("Bear")).get("fair_value")
+    base_fv = _safe_dict(sens.get("Base")).get("fair_value") or fv
+    bull_fv = _safe_dict(sens.get("Bull")).get("fair_value")
+
+    # If no sensitivity, derive from ±25% / ±50% of fair value
+    if not bear_fv: bear_fv = fv * 0.75 if fv else (price * 0.80 if price else None)
+    if not bull_fv: bull_fv = fv * 1.50 if fv else (price * 1.25 if price else None)
+
+    bear_target = bear_fv * 0.80 if bear_fv else (price * 0.82 if price else None)
+    base_target = target or (base_fv * 1.20 if base_fv else (price * 1.10 if price else None))
+    bull_target = bull_fv * 1.20 if bull_fv else (price * 1.30 if price else None)
+
+    bear_pct = ((bear_target / price - 1) * 100) if bear_target and price else None
+    base_pct = ((base_target / price - 1) * 100) if base_target and price else None
+    bull_pct = ((bull_target / price - 1) * 100) if bull_target and price else None
+
+    # ── Quality & risk inputs ─────────────────────────────────────────────────
+    piotroski   = _safe_dict(risk_r.get("piotroski")).get("score", 5)     # 0–9
+    altman_z    = _safe_dict(risk_r.get("altman_z")).get("zone", "GRAY")
+    sharpe      = risk_r.get("sharpe") or 0
+    sortino     = risk_r.get("sortino") or 0
+    roic_spread = _safe_dict(risk_r.get("roic_wacc")).get("spread") or 0
+    max_dd      = abs(risk_r.get("max_drawdown_pct") or 0)
+
+    # RSI from technical dict
+    rsi_val = tech.get("rsi")
+
+    # ── Composite recommendation score (0–10) ─────────────────────────────────
+    # Valuation signal → 0–4
+    sig_pts = {"STRONG_BUY": 4, "BUY": 3.2, "HOLD_WATCH": 2, "WAIT": 1, "AVOID_PEAK": 0}.get(signal, 2)
+    # Quality → 0–2
+    quality_pts = (piotroski / 9) * 2
+    # Financial safety → 0–1
+    safety_pts = 1.0 if altman_z == "SAFE" else 0.4 if altman_z == "GRAY" else 0.0
+    # Momentum → 0–1.5
+    mom_pts = min(max(sharpe, 0) * 0.75, 1.5)
+    # ROIC/WACC → 0–1
+    roic_pts = min(max(roic_spread * 10, 0), 1.0) if roic_spread else 0
+    # RSI mean-reversion bonus (oversold = good, overbought = bad)
+    rsi_pts = 0.3 if rsi_val and rsi_val < 35 else (-0.5 if rsi_val and rsi_val > 70 else 0)
+    # Earnings risk penalty
+    earn_pen = 0.8 if days_to_earnings and days_to_earnings <= 7 else (
+               0.3 if days_to_earnings and days_to_earnings <= 14 else 0)
+
+    composite = sig_pts + quality_pts + safety_pts + mom_pts + roic_pts + rsi_pts - earn_pen
+
+    # ── Map to recommendation ─────────────────────────────────────────────────
+    if composite >= 7.5:
+        rec = "STRONG BUY"; rec_c = GREEN; rec_bg = GREEN_LT
+    elif composite >= 5.8:
+        rec = "BUY";         rec_c = GREEN; rec_bg = GREEN_LT
+    elif composite >= 4.2:
+        rec = "ACCUMULATE";  rec_c = BLUE;  rec_bg = BLUE_LT
+    elif composite >= 2.8:
+        rec = "HOLD";        rec_c = AMBER; rec_bg = AMBER_LT
+    elif composite >= 1.5:
+        rec = "REDUCE";      rec_c = AMBER; rec_bg = AMBER_LT
+    else:
+        rec = "AVOID";       rec_c = RED;   rec_bg = RED_LT
+
+    # ── Risk rating ───────────────────────────────────────────────────────────
+    risk_score = 0
+    if altman_z == "DISTRESS": risk_score += 3
+    elif altman_z == "GRAY":   risk_score += 1
+    if max_dd > 45: risk_score += 2
+    elif max_dd > 30: risk_score += 1
+    if days_to_earnings and days_to_earnings <= 7: risk_score += 2
+    elif days_to_earnings and days_to_earnings <= 14: risk_score += 1
+    if rsi_val and rsi_val > 72: risk_score += 1
+    if piotroski < 4: risk_score += 1
+
+    if risk_score >= 5:
+        risk_label = "VERY HIGH"; risk_c = RED
+    elif risk_score >= 3:
+        risk_label = "HIGH"; risk_c = AMBER
+    elif risk_score >= 1:
+        risk_label = "MODERATE"; risk_c = BLUE
+    else:
+        risk_label = "LOW"; risk_c = GREEN
+
+    # ── One-line thesis ───────────────────────────────────────────────────────
+    parts = []
+    if signal == "STRONG_BUY":
+        parts.append(f"trading at a deep discount — {abs(premium):.0f}% below fair value")
+    elif signal == "BUY":
+        parts.append(f"within buy zone ({abs(premium):.0f}% below FV)")
+    elif signal == "AVOID_PEAK":
+        parts.append(f"overvalued by {premium:.0f}% vs intrinsic value — wait for pullback")
+    else:
+        parts.append(f"near fair value ({premium:+.0f}% premium)")
+    if piotroski >= 7:
+        parts.append(f"Piotroski {piotroski}/9 signals strong fundamentals")
+    elif piotroski <= 3:
+        parts.append(f"Piotroski {piotroski}/9 flags fundamental weakness")
+    if sharpe > 1.0:
+        parts.append(f"Sharpe {sharpe:.2f} — excellent risk-adjusted returns")
+    elif sharpe < 0:
+        parts.append(f"negative Sharpe — underperforming risk-free rate")
+    if roic_spread and roic_spread > 0.05:
+        parts.append(f"ROIC exceeds WACC by {roic_spread*100:.1f}pp — value creation confirmed")
+    if days_to_earnings and days_to_earnings <= 14:
+        parts.append(f"earnings in {days_to_earnings}d — binary risk event approaching")
+    thesis = ". ".join(p.capitalize() for p in parts[:3]) + "."
+
+    return {
+        "rec": rec, "rec_c": rec_c, "rec_bg": rec_bg,
+        "composite": composite,
+        "bear_target": bear_target, "base_target": base_target, "bull_target": bull_target,
+        "bear_pct": bear_pct, "base_pct": base_pct, "bull_pct": bull_pct,
+        "entry": entry, "stop": stop, "target": target,
+        "upside": upside, "rr": rr, "premium": premium,
+        "risk_label": risk_label, "risk_c": risk_c,
+        "piotroski": piotroski, "sharpe": sharpe, "altman_z": altman_z,
+        "rsi": rsi_val, "thesis": thesis,
+    }
+
+
+def tab_calendar(top10, universe_data: dict, valuation: dict = None, risk: dict = None):
+    """Wall Street-style earnings calendar + quant analysis for the top-10 portfolio."""
+    st.markdown(
+        shdr("Market Intelligence — Earnings Calendar & Outlook",
+             "Quantitative analysis + price targets + trade roadmap for every portfolio stock"),
+        unsafe_allow_html=True,
+    )
+
+    if top10 is None or (hasattr(top10, "__len__") and len(top10) == 0):
+        st.info("Run the analysis first to populate the earnings calendar for your picks.")
+        return
+
+    val  = valuation or {}
+    rsk  = risk or {}
+
+    # ── Build enriched rows ───────────────────────────────────────────────────
+    rows = []
+    for _, row in top10.iterrows():
+        t     = row["ticker"]
+        d     = universe_data.get(t, {})
+        info  = d.get("info", {})
+        tech  = d.get("technical", {})
+        name  = info.get("shortName", t)
+        sector= d.get("sector", "—")
+        days  = d.get("earnings_days_away")
+        edate = d.get("earnings_date", "") or ""
+        score = float(row.get("composite_score", 0))
+        price = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+
+        val_r = val.get(t, {})
+        risk_r= rsk.get(t, {})
+
+        analysis = _calendar_quant_analysis(t, val_r, risk_r, info, tech, days, score)
+
+        rows.append({
+            "ticker": t, "name": name, "sector": sector,
+            "days": days, "edate": edate, "score": score, "price": price,
+            "signal": val_r.get("signal", ""),
+            "analysis": analysis,
+        })
+
+    has_date = sorted([r for r in rows if r["days"] is not None], key=lambda r: r["days"])
+    no_date  = [r for r in rows if r["days"] is None]
+    ordered  = has_date + no_date
+
+    # ── Portfolio Sentiment Overview ──────────────────────────────────────────
+    all_recs = [r["analysis"]["rec"] for r in rows]
+    buys  = sum(1 for r in all_recs if r in ("STRONG BUY","BUY","ACCUMULATE"))
+    holds = sum(1 for r in all_recs if r == "HOLD")
+    sells = sum(1 for r in all_recs if r in ("REDUCE","AVOID"))
+    avg_base_pct = sum(
+        r["analysis"]["base_pct"] for r in rows if r["analysis"]["base_pct"] is not None
+    ) / max(sum(1 for r in rows if r["analysis"]["base_pct"] is not None), 1)
+    urgents = [r["ticker"] for r in rows if r["days"] is not None and r["days"] <= 14]
+
+    overview_c = GREEN if buys > holds + sells else RED if sells > buys else AMBER
+    st.markdown(
+        f'<div style="background:{GRAY_LT};border:1px solid {BORDER};border-radius:12px;'
+        f'padding:18px 24px;margin-bottom:24px;display:flex;gap:32px;flex-wrap:wrap;align-items:center">'
+        f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;'
+        f'letter-spacing:.08em;margin-bottom:4px">Portfolio Consensus</div>'
+        f'<div style="font-size:24px;font-weight:900;color:{overview_c}">'
+        f'{buys} BUY&nbsp; · &nbsp;{holds} HOLD&nbsp; · &nbsp;{sells} REDUCE</div></div>'
+        f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;'
+        f'letter-spacing:.08em;margin-bottom:4px">Avg Base-Case Upside</div>'
+        f'<div style="font-size:24px;font-weight:900;color:{GREEN if avg_base_pct>0 else RED}">'
+        f'{avg_base_pct:+.1f}%</div></div>'
+        f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;'
+        f'letter-spacing:.08em;margin-bottom:4px">Earnings Risk (≤14d)</div>'
+        f'<div style="font-size:20px;font-weight:900;color:{RED if urgents else GREEN}">'
+        f'{", ".join(urgents) if urgents else "None"}</div></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Next-up hero banner ───────────────────────────────────────────────────
+    if has_date:
+        n  = has_date[0]
+        d2 = n["days"]
+        nb_c = RED if d2<=7 else AMBER if d2<=14 else BLUE if d2<=30 else MUTED
+        nb_bg= RED_LT if d2<=7 else AMBER_LT if d2<=14 else BLUE_LT if d2<=30 else GRAY_LT
+        urgency = ("URGENT — wait for results" if d2<=7 else
+                   "SOON — reduce size" if d2<=14 else
+                   "THIS MONTH — monitor" if d2<=30 else f"{d2}d out")
+        st.markdown(
+            f'<div style="background:{nb_bg};border:1px solid {nb_c}44;border-left:5px solid {nb_c};'
+            f'border-radius:12px;padding:18px 24px;margin-bottom:24px;'
+            f'display:flex;align-items:center;gap:24px;flex-wrap:wrap">'
+            f'<div style="font-size:44px;font-weight:900;color:{nb_c};line-height:1">'
+            f'{d2}<span style="font-size:18px">d</span></div>'
+            f'<div><div style="font-weight:800;font-size:16px;color:{TEXT}">'
+            f'{n["ticker"]} — Next Earnings In Portfolio</div>'
+            f'<div style="font-size:13px;color:{MUTED};margin-top:3px">'
+            f'{n["name"]}  ·  {n["edate"]}  ·  {urgency}</div></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Full Wall Street Analysis Cards ───────────────────────────────────────
+    st.markdown(shdr("Stock-by-Stock Analysis", "Quant-driven recommendation · price targets · entry roadmap"), unsafe_allow_html=True)
+
+    for r in ordered:
+        a   = r["analysis"]
+        d2  = r["days"]
+        t   = r["ticker"]
+
+        # Earnings urgency color
+        e_c = RED if d2 and d2<=7 else AMBER if d2 and d2<=14 else BLUE if d2 and d2<=30 else MUTED2
+        e_bg= RED_LT if d2 and d2<=7 else AMBER_LT if d2 and d2<=14 else BLUE_LT if d2 and d2<=30 else GRAY_LT
+        earn_txt = f"{d2}d — {r['edate']}" if d2 is not None else "No date"
+
+        def _pct(v):
+            if v is None: return "n/a"
+            return f"{v:+.1f}%"
+        def _px(v):
+            if v is None: return "n/a"
+            return f"${v:,.2f}"
+
+        bear_c = GREEN if (a["bear_pct"] or 0) > 0 else RED
+        base_c = GREEN if (a["base_pct"] or 0) > 0 else RED
+        bull_c = GREEN
+
+        # Build bear/base/bull bars (width = |pct| capped at 50%)
+        def _scenario_bar(pct, color, label, target_px):
+            if pct is None: return ""
+            w = min(abs(pct), 50) * 2   # 0-100%
+            arrow = "▲" if pct > 0 else "▼"
+            return (
+                f'<div style="margin-bottom:8px">'
+                f'<div style="display:flex;justify-content:space-between;'
+                f'font-size:11px;font-weight:700;margin-bottom:3px">'
+                f'<span style="color:{MUTED2};text-transform:uppercase;letter-spacing:.05em">{label}</span>'
+                f'<span style="color:{color}">{arrow} {_pct(pct)} &nbsp; {_px(target_px)}</span>'
+                f'</div>'
+                f'<div style="background:{BORDER};border-radius:3px;height:5px">'
+                f'<div style="width:{w:.0f}%;background:{color};border-radius:3px;height:100%"></div>'
+                f'</div></div>'
+            )
+
+        bear_bar = _scenario_bar(a["bear_pct"], RED,   "Bear Case", a["bear_target"])
+        base_bar = _scenario_bar(a["base_pct"], base_c,"Base Case", a["base_target"])
+        bull_bar = _scenario_bar(a["bull_pct"], GREEN, "Bull Case", a["bull_target"])
+
+        # RSI indicator
+        rsi_txt = f'RSI {a["rsi"]:.0f}' if a["rsi"] else ""
+        rsi_c   = RED if a["rsi"] and a["rsi"]>70 else GREEN if a["rsi"] and a["rsi"]<30 else MUTED2
+        rsi_lbl = " — Overbought" if a["rsi"] and a["rsi"]>70 else " — Oversold" if a["rsi"] and a["rsi"]<30 else ""
+
+        # Entry checklist
+        entry_ok  = r["price"] and a["entry"] and r["price"] <= a["entry"]
+        entry_msg = ("✅ IN BUY ZONE — entry confirmed" if entry_ok else
+                     f"⏳ Wait for pullback to {_px(a['entry'])}")
+        entry_mc  = GREEN if entry_ok else AMBER
+
+        with st.expander(
+            f"{'🔴' if d2 and d2<=7 else '🟡' if d2 and d2<=14 else '🔵' if d2 and d2<=30 else '⚪'}  "
+            f"{t} — {r['name']}  ·  {a['rec']}  ·  Earnings: {earn_txt}",
+            expanded=(d2 is not None and d2 <= 14),
+        ):
+            col_left, col_right = st.columns([3, 2])
+
+            with col_left:
+                # Header: price + recommendation badge
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;flex-wrap:wrap">'
+                    f'<div style="font-size:32px;font-weight:900;color:{TEXT};'
+                    f'font-variant-numeric:tabular-nums">{_px(r["price"])}</div>'
+                    f'<div style="background:{a["rec_bg"]};color:{a["rec_c"]};'
+                    f'font-weight:800;font-size:14px;padding:6px 16px;border-radius:24px;'
+                    f'border:1.5px solid {a["rec_c"]}44;letter-spacing:.04em">{a["rec"]}</div>'
+                    f'{signal_badge(r["signal"])}'
+                    f'<div style="font-size:11px;color:{a["risk_c"]};font-weight:700;'
+                    f'background:{GRAY_LT};padding:4px 10px;border-radius:20px;'
+                    f'border:1px solid {a["risk_c"]}44">Risk: {a["risk_label"]}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Thesis
+                st.markdown(
+                    f'<div style="background:#F8FAFF;border:1px solid {BLUE}22;border-left:3px solid {BLUE};'
+                    f'border-radius:8px;padding:12px 14px;font-size:13px;color:{TEXT};'
+                    f'line-height:1.6;margin-bottom:16px"><b>Quant Thesis:</b> {a["thesis"]}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Scenarios
+                st.markdown(
+                    f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
+                    f'border-radius:10px;padding:14px 16px;margin-bottom:14px">'
+                    f'<div style="font-size:10px;font-weight:700;color:{MUTED2};'
+                    f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Price Scenarios (12-Month)</div>'
+                    f'{bear_bar}{base_bar}{bull_bar}'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Entry road map
+                st.markdown(
+                    f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
+                    f'border-radius:10px;padding:14px 16px">'
+                    f'<div style="font-size:10px;font-weight:700;color:{MUTED2};'
+                    f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">Trade Road Map</div>'
+                    f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px">'
+                    f'<div><div style="font-size:9px;color:{MUTED2};text-transform:uppercase;margin-bottom:3px">Entry Zone</div>'
+                    f'<div style="font-weight:800;font-size:15px;color:{GREEN}">{_px(a["entry"])}</div></div>'
+                    f'<div><div style="font-size:9px;color:{MUTED2};text-transform:uppercase;margin-bottom:3px">Target</div>'
+                    f'<div style="font-weight:800;font-size:15px;color:{GREEN}">{_px(a["target"])}</div></div>'
+                    f'<div><div style="font-size:9px;color:{MUTED2};text-transform:uppercase;margin-bottom:3px">Stop Loss</div>'
+                    f'<div style="font-weight:800;font-size:15px;color:{RED}">{_px(a["stop"])}</div></div>'
+                    f'<div><div style="font-size:9px;color:{MUTED2};text-transform:uppercase;margin-bottom:3px">R/R Ratio</div>'
+                    f'<div style="font-weight:800;font-size:15px;color:{BLUE}">{f"{a[chr(114)+chr(114)]:.2f}x" if a["rr"] else "n/a"}</div></div>'
+                    f'</div>'
+                    f'<div style="margin-top:10px;font-size:12px;color:{entry_mc};font-weight:700">{entry_msg}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            with col_right:
+                # Earnings tile
+                st.markdown(
+                    f'<div style="background:{e_bg};border:1px solid {e_c}44;border-radius:10px;'
+                    f'padding:14px 16px;margin-bottom:14px;text-align:center">'
+                    f'<div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;'
+                    f'letter-spacing:.08em;margin-bottom:6px">Next Earnings</div>'
+                    f'<div style="font-size:28px;font-weight:900;color:{e_c};line-height:1">'
+                    f'{"—" if d2 is None else str(d2)}'
+                    f'{"" if d2 is None else "<span style=font-size:14px> days</span>"}</div>'
+                    f'<div style="font-size:12px;color:{MUTED};margin-top:4px">{r["edate"] or "No date"}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Key quant metrics
+                az_c = GREEN if a["altman_z"]=="SAFE" else RED if a["altman_z"]=="DISTRESS" else AMBER
+                sh_c = GREEN if a["sharpe"] and a["sharpe"]>0.5 else RED if a["sharpe"] and a["sharpe"]<0 else MUTED2
+                pi_c = GREEN if a["piotroski"]>=7 else RED if a["piotroski"]<=3 else AMBER
+                up_c = GREEN if a["upside"] and a["upside"]>0 else RED
+
+                st.markdown(
+                    f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
+                    f'border-radius:10px;padding:14px 16px;margin-bottom:14px">'
+                    f'<div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;'
+                    f'letter-spacing:.08em;margin-bottom:10px">Quant Metrics</div>'
+                    f'<div style="display:flex;flex-direction:column;gap:8px">'
+                    + "".join([
+                        f'<div style="display:flex;justify-content:space-between;'
+                        f'border-bottom:1px solid {BORDER};padding-bottom:6px">'
+                        f'<span style="font-size:12px;color:{MUTED}">{lbl}</span>'
+                        f'<span style="font-size:12px;font-weight:700;color:{vc}">{val_str}</span></div>'
+                        for lbl, val_str, vc in [
+                            ("Composite Score",  f"{r['score']:.0f} / 100",      BLUE),
+                            ("Valuation Signal", r["signal"] or "—",              GREEN if "BUY" in r["signal"] else RED if r["signal"]=="AVOID_PEAK" else AMBER),
+                            ("Piotroski Score",  f"{a['piotroski']} / 9",         pi_c),
+                            ("Altman Z",         a["altman_z"],                   az_c),
+                            ("Sharpe Ratio",     f"{a['sharpe']:.2f}" if a["sharpe"] else "n/a", sh_c),
+                            ("Upside to Target", _pct(a["upside"]),               up_c),
+                            ("RSI (14d)",        f"{a['rsi']:.0f}{rsi_lbl}" if a["rsi"] else "n/a", rsi_c),
+                        ]
+                    ])
+                    + f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Earnings action guidance
+                if d2 is not None:
+                    if d2 <= 7:
+                        guidance = "Do NOT enter new positions. Wait for results and market reaction. Binary risk — gap risk both ways."
+                        g_c = RED
+                    elif d2 <= 14:
+                        guidance = "Reduce size to 50% of target. Set limit orders below entry zone in case of post-earnings dip."
+                        g_c = AMBER
+                    elif d2 <= 30:
+                        guidance = "Acceptable to enter at or below entry zone. Keep stop loss active heading into earnings."
+                        g_c = BLUE
+                    else:
+                        guidance = "Earnings far enough out — enter freely if price is in the buy zone with full position sizing."
+                        g_c = GREEN
+                    st.markdown(
+                        f'<div style="background:{GRAY_LT};border:1px solid {g_c}44;'
+                        f'border-left:3px solid {g_c};border-radius:8px;'
+                        f'padding:11px 14px;font-size:12px;color:{TEXT};line-height:1.5">'
+                        f'<b style="color:{g_c}">Action guidance:</b> {guidance}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+    # ── Visual timeline chart ─────────────────────────────────────────────────
+    if has_date:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(shdr("Earnings Timeline"), unsafe_allow_html=True)
+
+        tickers_p = [r["ticker"] for r in has_date]
+        days_p    = [r["days"]   for r in has_date]
+        colors_p  = [RED if d2<=7 else AMBER if d2<=14 else BLUE if d2<=30 else MUTED2 for d2 in days_p]
+
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=days_p, y=tickers_p, orientation="h",
+            marker_color=colors_p,
+            text=[f"{d2}d" for d2 in days_p], textposition="outside",
+            hovertemplate="%{y}: %{x} days until earnings<extra></extra>",
+        ))
+        fig.add_vline(x=7,  line_color=RED,   line_dash="dot", annotation_text="7d")
+        fig.add_vline(x=14, line_color=AMBER,  line_dash="dot", annotation_text="14d")
+        fig.add_vline(x=30, line_color=BLUE,   line_dash="dot", annotation_text="30d")
+        fig.update_layout(
+            **_plotly_base(),
+            height=max(280, len(has_date) * 42),
+            margin=dict(l=60, r=80, t=30, b=40),
+            xaxis=dict(title="Days Until Earnings", showgrid=True, gridcolor=BORDER, range=[0, max(days_p) * 1.18]),
+            yaxis=dict(showgrid=False, autorange="reversed"),
+            bargap=0.3,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # ── Methodology note ─────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="margin-top:16px;padding:13px 18px;background:{GRAY_LT};'
+        f'border-radius:8px;border:1px solid {BORDER};font-size:12px;color:{MUTED}">'
+        f'<b>Methodology:</b> Recommendations are generated from pure quantitative inputs — '
+        f'valuation signal (DCF/Graham/EV-EBITDA/FCF yield), Piotroski F-Score, Altman Z-Score, '
+        f'Sharpe ratio, ROIC/WACC spread, RSI, and earnings proximity risk. '
+        f'Price scenarios derive from DCF sensitivity (Bear 50% / Base 100% / Bull 150% of growth estimate). '
+        f'No external AI or analyst opinions — all outputs are mathematical. '
+        f'This is not financial advice — always conduct your own due diligence.'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -2897,9 +3527,20 @@ def tab_history():
 
     # ── Session cards ──────────────────────────────────────────────────────
     now = datetime.now(timezone.utc)
+    _FACTOR_LABELS = {
+        "momentum":   "Momentum",
+        "volatility": "Volatility",
+        "value":      "Value",
+        "quality":    "Quality",
+        "technical":  "Technical",
+        "sentiment":  "Sentiment",
+        "dividend":   "Dividend",
+    }
 
     for session in sessions:
-        ts      = session.get("timestamp", "")[:10]
+        ts      = session.get("timestamp", "")
+        ts_date = ts[:10]
+        ts_time = ts[11:16] if len(ts) > 15 else ""
         sid     = session.get("session_id", "?")
         prof    = session.get("profile", {})
         risk    = prof.get("risk_level", "?")
@@ -2908,10 +3549,6 @@ def tab_history():
         picks   = session.get("picks", [])
         is_eval = session.get("evaluated", False)
 
-        tickers_short = "  ·  ".join(p["ticker"] for p in picks[:6])
-        if len(picks) > 6:
-            tickers_short += f"  +{len(picks)-6}"
-
         if is_eval:
             ev      = session.get("evaluation") or {}
             avg_ret = ev.get("avg_pick_return", 0) or 0
@@ -2919,9 +3556,9 @@ def tab_history():
             ret_sign = "+" if avg_ret >= 0 else ""
             al_sign  = "+" if alpha   >= 0 else ""
             label = (
-                f"**{ts}**  ·  #{sid}  ·  Risk {risk} / {horizon} / {goal}"
-                f"  —  Return: {ret_sign}{avg_ret*100:.1f}%"
-                f"  ·  Alpha: {al_sign}{alpha*100:.1f}%"
+                f"**{ts_date}** {ts_time}  ·  Session #{sid}  ·  "
+                f"Risk {risk} / {horizon} / {goal}"
+                f"  —  Return: {ret_sign}{avg_ret*100:.1f}%  ·  Alpha: {al_sign}{alpha*100:.1f}%"
             )
         else:
             try:
@@ -2932,153 +3569,807 @@ def tab_history():
                 days_old  = 0
                 days_left = 30
             label = (
-                f"**{ts}**  ·  #{sid}  ·  Risk {risk} / {horizon} / {goal}"
-                f"  —  Pending ({days_old} days old, evaluates in ~{days_left} more)"
+                f"**{ts_date}** {ts_time}  ·  Session #{sid}  ·  "
+                f"Risk {risk} / {horizon} / {goal}"
+                f"  —  Pending evaluation ({days_old}d old)"
             )
 
         with st.expander(label, expanded=False):
-            # Profile info row
+            # ── Session profile header ──────────────────────────────────────
             st.markdown(
-                f'<div style="display:flex;gap:28px;margin-bottom:16px;flex-wrap:wrap">'
-                f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;letter-spacing:.08em">Risk Level</div>'
-                f'<div style="font-weight:700;font-size:15px">{risk}</div></div>'
-                f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;letter-spacing:.08em">Horizon</div>'
-                f'<div style="font-weight:700;font-size:15px">{horizon}</div></div>'
-                f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;letter-spacing:.08em">Goal</div>'
-                f'<div style="font-weight:700;font-size:15px">{goal}</div></div>'
-                f'<div><div style="font-size:10px;font-weight:700;color:{MUTED2};text-transform:uppercase;letter-spacing:.08em">Picks</div>'
-                f'<div style="font-weight:700;font-size:15px">{len(picks)}</div></div>'
+                f'<div style="background:{GRAY_LT};border:1px solid {BORDER};border-radius:10px;'
+                f'padding:14px 20px;margin-bottom:20px;display:flex;gap:32px;flex-wrap:wrap">'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Session</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{TEXT}">#{sid}</div></div>'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Date &amp; Time</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{TEXT}">{ts_date} {ts_time} UTC</div></div>'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Risk Level</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{TEXT}">{risk}</div></div>'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Horizon</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{TEXT}">{horizon}</div></div>'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Goal</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{TEXT}">{goal}</div></div>'
+                f'<div><div style="font-size:9.5px;font-weight:700;color:{MUTED2};'
+                f'text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px">Picks</div>'
+                f'<div style="font-weight:700;font-size:14px;color:{BLUE}">{len(picks)}</div></div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
 
+            # ── Performance summary (evaluated sessions) ────────────────────
             if is_eval:
                 ev      = session.get("evaluation") or {}
                 avg_ret = ev.get("avg_pick_return", 0) or 0
                 sp_ret  = ev.get("sp500_return")
-                alpha   = ev.get("alpha", 0) or 0
+                alpha2  = ev.get("alpha", 0) or 0
                 eval_dt = (ev.get("evaluation_date") or "")[:10]
 
                 ret_c   = GREEN if avg_ret >= 0 else RED
-                alpha_c = GREEN if alpha   >= 0 else RED
+                alpha_c = GREEN if alpha2  >= 0 else RED
+                sp_c    = GREEN if (sp_ret or 0) >= 0 else RED
 
                 mc1, mc2, mc3 = st.columns(3)
                 with mc1:
-                    st.markdown(mtile("Avg Pick Return", f"{avg_ret*100:+.1f}%", f"evaluated {eval_dt}", ret_c, ret_c), unsafe_allow_html=True)
+                    st.markdown(mtile("Avg Pick Return", f"{avg_ret*100:+.1f}%",
+                                      f"evaluated {eval_dt}", ret_c, ret_c), unsafe_allow_html=True)
                 with mc2:
-                    sp_str = f"{sp_ret*100:+.1f}%" if sp_ret is not None else "—"
-                    sp_c   = GREEN if (sp_ret or 0) >= 0 else RED
-                    st.markdown(mtile("S&P 500 Return", sp_str, "over same period", sp_c, sp_c), unsafe_allow_html=True)
+                    sp_str2 = f"{sp_ret*100:+.1f}%" if sp_ret is not None else "n/a"
+                    st.markdown(mtile("S&P 500 Return", sp_str2,
+                                      "over same period", sp_c, sp_c), unsafe_allow_html=True)
                 with mc3:
-                    st.markdown(mtile("Alpha", f"{alpha*100:+.1f}%", "picks vs benchmark", alpha_c, alpha_c), unsafe_allow_html=True)
-
+                    st.markdown(mtile("Alpha", f"{alpha2*100:+.1f}%",
+                                      "picks vs benchmark", alpha_c, alpha_c), unsafe_allow_html=True)
                 st.markdown("<br>", unsafe_allow_html=True)
 
-                ev_picks = ev.get("picks", [])
-                if ev_picks:
-                    entry_map = {p["ticker"]: p.get("price_entry") for p in picks}
-                    rows = []
-                    for ep in ev_picks:
-                        r = ep.get("return", 0) or 0
-                        rows.append({
-                            "Ticker":      ep["ticker"],
-                            "Entry":       f"${entry_map.get(ep['ticker'], 0):.2f}" if entry_map.get(ep['ticker']) else "—",
-                            "Exit":        f"${ep.get('price_exit', 0):.2f}",
-                            "Return":      f"{r*100:+.1f}%",
-                            "Score @ Rec": f"{ep.get('composite_at_rec', 0):.1f}",
-                        })
-
-                    def _color_ret(val):
-                        try:
-                            v = float(str(val).replace("%","").replace("+",""))
-                            return f"color: {'#16a34a' if v >= 0 else '#dc2626'}; font-weight: 700"
-                        except Exception:
-                            return ""
-
-                    df = pd.DataFrame(rows)
-                    st.dataframe(
-                        df.style.map(_color_ret, subset=["Return"]),
-                        use_container_width=True, hide_index=True,
-                    )
+            # ── Pending banner ──────────────────────────────────────────────
             else:
                 try:
-                    ts_dt    = datetime.fromisoformat(session["timestamp"])
-                    days_old = (now - ts_dt).days
-                    days_left = max(0, 30 - days_old)
+                    ts_dt2    = datetime.fromisoformat(session["timestamp"])
+                    days_old2 = (now - ts_dt2).days
+                    days_left2 = max(0, 30 - days_old2)
                 except Exception:
-                    days_old  = 0
-                    days_left = 30
+                    days_old2  = 0
+                    days_left2 = 30
 
-                st.info(
-                    f"Evaluation pending — {days_old} days old. "
-                    f"Will auto-evaluate in ~{days_left} more days next time you run the tool."
+                st.markdown(
+                    f'<div style="background:{AMBER_LT};border:1px solid {AMBER}44;'
+                    f'border-left:4px solid {AMBER};border-radius:8px;padding:12px 16px;'
+                    f'margin-bottom:16px;font-size:13px;color:{TEXT}">'
+                    f'<b>Evaluation pending</b> — {days_old2} days old. '
+                    f'Auto-evaluates in ~{days_left2} more days when you next run the tool.</div>',
+                    unsafe_allow_html=True,
                 )
 
-                if picks:
-                    rows = [
-                        {"Ticker": p["ticker"],
-                         "Entry Price": f"${p.get('price_entry', 0):.2f}",
-                         "Score": f"{p.get('composite_score', 0):.1f}"}
-                        for p in picks
-                    ]
-                    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            # ── Full pick cards ─────────────────────────────────────────────
+            if picks:
+                st.markdown(
+                    f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:.08em;color:{MUTED2};margin-bottom:12px">Picks — as generated</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Get evaluated exit prices if available
+                ev_picks_map = {}
+                if is_eval:
+                    for ep in (session.get("evaluation") or {}).get("picks", []):
+                        ev_picks_map[ep["ticker"]] = ep
+
+                for pick in picks:
+                    pt     = pick["ticker"]
+                    ep_    = pick.get("price_entry", 0)
+                    sc_    = pick.get("composite_score", 0)
+                    factors= pick.get("factors", {})
+                    ev_p   = ev_picks_map.get(pt, {})
+                    exit_p = ev_p.get("price_exit")
+                    ret_p  = ev_p.get("return")
+
+                    sc_color = score_color(sc_)
+                    ret_html = ""
+                    if ret_p is not None:
+                        rc2 = GREEN if ret_p >= 0 else RED
+                        ret_html = (
+                            f'<div style="font-size:11px;color:{MUTED2};margin-top:2px">'
+                            f'Exit: <b style="color:{TEXT}">${exit_p:.2f}</b>'
+                            f'  →  <b style="color:{rc2}">{ret_p*100:+.1f}%</b></div>'
+                        )
+
+                    # Factor score bars
+                    factor_bars = ""
+                    if factors:
+                        for fname, flabel in _FACTOR_LABELS.items():
+                            fkey = f"{fname}_score"
+                            fval = factors.get(fkey)
+                            if fval is not None:
+                                fw   = min(float(fval), 100)
+                                fc2  = score_color(fw)
+                                factor_bars += (
+                                    f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">'
+                                    f'<div style="width:68px;font-size:10px;color:{MUTED};text-align:right">{flabel}</div>'
+                                    f'<div style="flex:1;background:{BORDER};border-radius:3px;height:6px">'
+                                    f'<div style="width:{fw:.0f}%;background:{fc2};border-radius:3px;height:100%"></div></div>'
+                                    f'<div style="width:30px;font-size:10px;font-weight:700;color:{fc2}">{fw:.0f}</div>'
+                                    f'</div>'
+                                )
+
+                    st.markdown(
+                        f'<div style="background:#FAFAFA;border:1px solid {BORDER};border-left:4px solid {sc_color};'
+                        f'border-radius:10px;padding:14px 18px;margin-bottom:10px;'
+                        f'display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">'
+                        # Ticker block
+                        f'<div style="min-width:80px">'
+                        f'<div style="font-size:20px;font-weight:900;color:{TEXT}">{pt}</div>'
+                        f'<div style="font-size:11px;color:{MUTED};margin-top:2px">Score: '
+                        f'<b style="color:{sc_color}">{sc_:.0f}</b></div>'
+                        f'</div>'
+                        # Score bar
+                        f'<div style="flex:1;min-width:120px;padding-top:4px">'
+                        f'<div style="background:{BORDER};border-radius:4px;height:8px;margin-bottom:6px">'
+                        f'<div style="width:{min(sc_,100):.0f}%;background:{sc_color};border-radius:4px;height:100%"></div></div>'
+                        # Entry / exit
+                        f'<div style="font-size:12px;color:{MUTED}">'
+                        f'Entry: <b style="color:{TEXT}">${ep_:.2f}</b></div>'
+                        f'{ret_html}'
+                        f'</div>'
+                        # Factor bars
+                        f'<div style="min-width:240px;flex:2">{factor_bars}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Evaluated full table ────────────────────────────────────────
+            if is_eval and ev_picks_map:
+                st.markdown("<br>", unsafe_allow_html=True)
+                def _color_ret2(val):
+                    try:
+                        v = float(str(val).replace("%","").replace("+",""))
+                        return f"color: {'#16a34a' if v >= 0 else '#dc2626'}; font-weight: 700"
+                    except Exception:
+                        return ""
+                ev_rows = []
+                for pick in picks:
+                    pt2  = pick["ticker"]
+                    ep2  = ev_picks_map.get(pt2, {})
+                    r2   = ep2.get("return") or 0
+                    ev_rows.append({
+                        "Ticker":      pt2,
+                        "Entry $":     f"${pick.get('price_entry',0):.2f}",
+                        "Exit $":      f"${ep2.get('price_exit',0):.2f}" if ep2.get("price_exit") else "n/a",
+                        "Return":      f"{r2*100:+.1f}%",
+                        "Score @ Rec": f"{pick.get('composite_score',0):.1f}",
+                    })
+                df_ev = pd.DataFrame(ev_rows)
+                st.dataframe(
+                    df_ev.style.map(_color_ret2, subset=["Return"]),
+                    use_container_width=True, hide_index=True,
+                )
+
+            # ── Time-machine button ─────────────────────────────────────────
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button(
+                f"📊 Open Full Analysis — {ts_date}",
+                key=f"detail_{sid}",
+                type="primary",
+                use_container_width=True,
+            ):
+                st.session_state.show_session_detail = session
+                st.session_state.show_history        = False
+                st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SESSION TIME-MACHINE — full historical analysis reconstruction
+# ─────────────────────────────────────────────────────────────────────────────
+def render_session_detail(session: dict):
+    """
+    Reconstruct the full analysis page for a past session.
+    Uses stored scores + factors + entry prices, then fetches live prices for P&L.
+    """
+    import yfinance as yf
+
+    sid     = session.get("session_id", "?")
+    ts      = session.get("timestamp", "")
+    ts_date = ts[:10]
+    ts_time = ts[11:16] if len(ts) > 15 else ""
+    prof    = session.get("profile", {})
+    picks   = session.get("picks", [])
+    sp500_e = session.get("sp500_entry")
+    is_eval = session.get("evaluated", False)
+    ev      = session.get("evaluation") or {}
+
+    risk_lv  = prof.get("risk_level", "?")
+    horizon  = prof.get("time_horizon", "?")
+    goal     = prof.get("goal", "?")
+
+    _FLABELS = {
+        "momentum": "Momentum", "volatility": "Volatility", "value": "Value",
+        "quality": "Quality",   "technical": "Technical",   "sentiment": "Sentiment",
+        "dividend": "Dividend",
+    }
+
+    # ── Back button ───────────────────────────────────────────────────────────
+    if st.button("← Back to History", type="secondary"):
+        st.session_state.show_session_detail = None
+        st.rerun()
+
+    # ── Session hero header ───────────────────────────────────────────────────
+    eval_badge = ""
+    if is_eval:
+        avg_ret = (ev.get("avg_pick_return") or 0) * 100
+        alpha   = (ev.get("alpha") or 0) * 100
+        r_c     = "#22c55e" if avg_ret >= 0 else "#ef4444"
+        a_c     = "#22c55e" if alpha   >= 0 else "#ef4444"
+        eval_badge = (
+            f'<span style="background:rgba(255,255,255,0.15);color:#fff;'
+            f'font-weight:700;padding:5px 14px;border-radius:20px;font-size:13px;margin-left:12px">'
+            f'Return: <span style="color:{r_c}">{avg_ret:+.1f}%</span>'
+            f'  ·  Alpha: <span style="color:{a_c}">{alpha:+.1f}%</span></span>'
+        )
+
+    st.markdown(
+        f'<div style="background:linear-gradient(135deg,#1e3a5f 0%,#2563EB 100%);'
+        f'border-radius:14px;padding:24px 30px;margin-bottom:24px;color:#fff">'
+        f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:.10em;color:rgba(255,255,255,.6);margin-bottom:6px">'
+        f'Session #{sid}  ·  Historical Analysis</div>'
+        f'<div style="font-size:28px;font-weight:900;margin-bottom:4px">'
+        f'{ts_date} &nbsp;<span style="font-size:16px;opacity:.7">{ts_time} UTC</span>'
+        f'{eval_badge}</div>'
+        f'<div style="font-size:14px;opacity:.8;margin-top:4px">'
+        f'Risk Level {risk_lv}  ·  {horizon.capitalize()} horizon  ·  Goal: {goal}'
+        f'{"  ·  S&P 500 at $" + f"{sp500_e:,.0f}" if sp500_e else ""}'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Performance overview (evaluated sessions) ─────────────────────────────
+    if is_eval:
+        avg_ret = (ev.get("avg_pick_return") or 0) * 100
+        sp_ret  = (ev.get("sp500_return") or 0) * 100
+        alpha   = (ev.get("alpha") or 0) * 100
+        eval_dt = (ev.get("evaluation_date") or "")[:10]
+        ret_c   = GREEN if avg_ret >= 0 else RED
+        sp_c    = GREEN if sp_ret  >= 0 else RED
+        al_c    = GREEN if alpha   >= 0 else RED
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1: st.markdown(mtile("Avg Pick Return", f"{avg_ret:+.1f}%", f"evaluated {eval_dt}", ret_c, ret_c), unsafe_allow_html=True)
+        with c2: st.markdown(mtile("S&P 500 Return",  f"{sp_ret:+.1f}%",  "same period", sp_c, sp_c), unsafe_allow_html=True)
+        with c3: st.markdown(mtile("Alpha",            f"{alpha:+.1f}%",   "picks vs benchmark", al_c, al_c), unsafe_allow_html=True)
+        with c4: st.markdown(mtile("Picks",            str(len(picks)),    "in this session", BLUE, BLUE), unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Fetch live prices ─────────────────────────────────────────────────────
+    tickers_list = [p["ticker"] for p in picks]
+    prices_now   = {}
+    ev_picks_map = {ep["ticker"]: ep for ep in ev.get("picks", [])} if is_eval else {}
+
+    with st.spinner("Fetching live prices for P&L…"):
+        for t in tickers_list:
+            try:
+                df = _normalize_yf(yf.download(t, period="5d", progress=False, auto_adjust=True))
+                if not df.empty:
+                    prices_now[t] = float(df["Close"].dropna().squeeze().iloc[-1])
+            except Exception:
+                pass
+
+    # ── Score rankings chart ──────────────────────────────────────────────────
+    if picks:
+        st.markdown(shdr("Composite Score Rankings", "As generated at time of analysis"), unsafe_allow_html=True)
+        sorted_picks = sorted(picks, key=lambda p: p.get("composite_score", 0), reverse=True)
+        bar_html = ""
+        for rank, p in enumerate(sorted_picks, 1):
+            sc  = p.get("composite_score", 0)
+            sc_c= score_color(sc)
+            w   = min(sc, 100)
+            t   = p["ticker"]
+            ep  = p.get("price_entry", 0)
+            lp  = prices_now.get(t)
+            ret = ((lp / ep - 1) * 100) if lp and ep else None
+            ret_str = f'<span style="color:{GREEN if (ret or 0)>=0 else RED};font-weight:700;font-size:11px">{ret:+.1f}%</span>' if ret is not None else ""
+            bar_html += (
+                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
+                f'<div style="width:14px;font-size:10px;color:{MUTED2};text-align:right">{rank}</div>'
+                f'<div style="width:52px;font-weight:800;font-size:14px;color:{TEXT}">{t}</div>'
+                f'<div style="flex:1;background:{BORDER};border-radius:4px;height:10px">'
+                f'<div style="width:{w:.0f}%;background:{sc_c};border-radius:4px;height:100%"></div></div>'
+                f'<div style="width:34px;font-weight:700;font-size:12px;color:{sc_c}">{sc:.0f}</div>'
+                f'{ret_str}'
+                f'</div>'
+            )
+        st.markdown(
+            f'<div style="background:{GRAY_LT};border:1px solid {BORDER};border-radius:12px;'
+            f'padding:18px 22px;margin-bottom:20px">{bar_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Returns comparison chart (Plotly) ─────────────────────────────────────
+    ret_data = []
+    for p in picks:
+        t  = p["ticker"]
+        ep = p.get("price_entry", 0)
+        lp = prices_now.get(t)
+        if lp and ep:
+            ret_data.append({"ticker": t, "ret": (lp / ep - 1) * 100})
+
+    if ret_data or is_eval:
+        st.markdown(shdr("Portfolio Returns", "Live P&L since entry date"), unsafe_allow_html=True)
+
+        # Use evaluated final returns if available, else live
+        chart_data = []
+        for p in picks:
+            t  = p["ticker"]
+            ep_ev = ev_picks_map.get(t, {})
+            final = (ep_ev.get("return") or 0) * 100 if is_eval and ep_ev.get("return") is not None else None
+            live  = next((r["ret"] for r in ret_data if r["ticker"] == t), None)
+            ret_use = final if final is not None else live
+            if ret_use is not None:
+                chart_data.append({"ticker": t, "ret": ret_use, "source": "Evaluated" if final is not None else "Live"})
+
+        if chart_data:
+            chart_data.sort(key=lambda x: x["ret"], reverse=True)
+            bar_colors  = [GREEN if d["ret"] >= 0 else RED for d in chart_data]
+            fig = go.Figure(go.Bar(
+                x=[d["ticker"] for d in chart_data],
+                y=[d["ret"] for d in chart_data],
+                marker_color=bar_colors,
+                text=[f"{d['ret']:+.1f}%" for d in chart_data],
+                textposition="outside",
+                hovertemplate="%{x}: %{y:+.1f}%<extra></extra>",
+            ))
+            # S&P 500 reference line
+            if sp500_e and prices_now:
+                try:
+                    sp_df   = _normalize_yf(yf.download("^GSPC", period="1d", progress=False, auto_adjust=True))
+                    sp_now  = float(sp_df["Close"].dropna().iloc[-1]) if not sp_df.empty else None
+                    sp_live = ((sp_now / sp500_e - 1) * 100) if sp_now and sp500_e else None
+                except Exception:
+                    sp_live = None
+            else:
+                sp_live = (ev.get("sp500_return") or 0) * 100 if is_eval else None
+
+            if sp_live is not None:
+                fig.add_hline(y=sp_live, line_color=BLUE, line_dash="dash", line_width=2,
+                              annotation_text=f"S&P 500: {sp_live:+.1f}%",
+                              annotation_position="right")
+            fig.add_hline(y=0, line_color=BORDER, line_width=1)
+            fig.update_layout(
+                **_plotly_base(),
+                height=360,
+                showlegend=False,
+                margin=dict(l=20, r=100, t=40, b=40),
+                yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False, ticksuffix="%"),
+                xaxis=dict(showgrid=False),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    # ── Full pick cards ───────────────────────────────────────────────────────
+    st.markdown(shdr("Full Portfolio — Picks As Generated", f"All factor scores, entries, and P&L"), unsafe_allow_html=True)
+
+    for idx in range(0, len(picks), 2):
+        cols = st.columns(2)
+        for col_idx, col in enumerate(cols):
+            pi = idx + col_idx
+            if pi >= len(picks):
+                break
+            pick    = picks[pi]
+            t       = pick["ticker"]
+            ep      = pick.get("price_entry", 0)
+            sc      = pick.get("composite_score", 0)
+            factors = pick.get("factors", {})
+            lp      = prices_now.get(t)
+            ev_p    = ev_picks_map.get(t, {})
+            exit_p  = ev_p.get("price_exit")
+            final_r = ev_p.get("return")
+
+            sc_c   = score_color(sc)
+            live_r = ((lp / ep - 1) * 100) if lp and ep else None
+            ret_show = (final_r * 100) if final_r is not None else live_r
+            ret_lbl  = "Final Return" if final_r is not None else "Live P&L"
+            ret_c_   = GREEN if (ret_show or 0) >= 0 else RED
+
+            # Factor bars
+            fbar = ""
+            for fname, flabel in _FLABELS.items():
+                fval = factors.get(f"{fname}_score")
+                if fval is not None:
+                    fw = min(float(fval), 100)
+                    fc = score_color(fw)
+                    fbar += (
+                        f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
+                        f'<div style="width:66px;font-size:10px;color:{MUTED};text-align:right">{flabel}</div>'
+                        f'<div style="flex:1;background:{BORDER};border-radius:3px;height:6px">'
+                        f'<div style="width:{fw:.0f}%;background:{fc};border-radius:3px;height:100%"></div></div>'
+                        f'<div style="width:28px;font-size:10px;font-weight:700;color:{fc}">{fw:.0f}</div>'
+                        f'</div>'
+                    )
+
+            with col:
+                st.markdown(
+                    f'<div style="background:#FAFAFA;border:1px solid {BORDER};'
+                    f'border-left:4px solid {sc_c};border-radius:12px;'
+                    f'padding:16px 18px;margin-bottom:12px">'
+                    # Header row
+                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">'
+                    f'<div>'
+                    f'<div style="font-size:22px;font-weight:900;color:{TEXT}">{t}</div>'
+                    f'<div style="font-size:11px;color:{MUTED};margin-top:2px">'
+                    f'Entry: <b style="color:{TEXT}">${ep:,.2f}</b>'
+                    f'{"  →  Exit: <b style=color:" + TEXT + ">${" + f"{exit_p:,.2f}" + "}</b>" if exit_p else ""}'
+                    f'{"  →  Now: <b style=color:" + TEXT + ">${" + f"{lp:,.2f}" + "}</b>" if lp and not exit_p else ""}'
+                    f'</div></div>'
+                    f'<div style="text-align:right">'
+                    f'<div style="font-size:22px;font-weight:900;color:{sc_c}">{sc:.0f}</div>'
+                    f'<div style="font-size:10px;color:{MUTED2}">score</div>'
+                    f'</div></div>'
+                    # Score bar
+                    f'<div style="background:{BORDER};border-radius:4px;height:6px;margin-bottom:12px">'
+                    f'<div style="width:{min(sc,100):.0f}%;background:{sc_c};border-radius:4px;height:100%"></div></div>'
+                    # Return badge
+                    + (f'<div style="background:{GREEN_LT if (ret_show or 0)>=0 else RED_LT};'
+                       f'color:{ret_c_};font-weight:800;font-size:16px;padding:8px 12px;'
+                       f'border-radius:8px;text-align:center;margin-bottom:12px">'
+                       f'{ret_show:+.1f}%  <span style="font-size:10px;font-weight:500">{ret_lbl}</span>'
+                       f'</div>' if ret_show is not None else "")
+                    # Factor bars
+                    + f'<div>{fbar}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # ── Footer ────────────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="margin-top:24px;padding:13px 18px;background:{GRAY_LT};'
+        f'border-radius:8px;border:1px solid {BORDER};font-size:12px;color:{MUTED}">'
+        f'Session #{sid} generated on {ts_date}. '
+        f'Factor scores and composite rankings reflect the model output at time of generation. '
+        f'Live P&L uses the most recent closing price fetched today. '
+        f'Evaluated return uses the official 30-day evaluation recorded by the memory system.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("← Back to History  ", type="secondary"):
+        st.session_state.show_session_detail = None
+        st.rerun()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SETTINGS PAGE
+# ─────────────────────────────────────────────────────────────────────────────
+def tab_settings():
+    s = st.session_state.get("settings", dict(DEFAULT_SETTINGS))
+
+    st.markdown(shdr("⚙️  Settings", "Appearance · Data Export · Analysis Behaviour"), unsafe_allow_html=True)
+
+    # ── Section 1: Appearance ─────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};'
+        f'letter-spacing:.05em;text-transform:uppercase;margin:24px 0 12px">Appearance</div>',
+        unsafe_allow_html=True,
+    )
+
+    theme_cols = st.columns(len(THEMES))
+    current_theme = s.get("theme", "Light")
+    new_theme = current_theme
+    for i, (tname, tmeta) in enumerate(THEMES.items()):
+        with theme_cols[i]:
+            selected = current_theme == tname
+            border = f"3px solid {tmeta['accent']}" if selected else f"2px solid {BORDER}"
+            check  = "✓ " if selected else ""
+            st.markdown(
+                f'<div style="border:{border};border-radius:12px;padding:14px 10px;'
+                f'text-align:center;background:{tmeta["bg"]};cursor:pointer;'
+                f'box-shadow:{"0 0 0 3px " + tmeta["accent"] + "33" if selected else "none"}">'
+                f'<div style="width:28px;height:28px;border-radius:50%;background:{tmeta["accent"]};'
+                f'margin:0 auto 8px"></div>'
+                f'<div style="font-size:12px;font-weight:700;color:{TEXT}">{check}{tname}</div>'
+                f'<div style="font-size:10px;color:{MUTED};margin-top:2px">bg · {tmeta["bg"]}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button(f"Select {tname}", key=f"theme_btn_{tname}", use_container_width=True,
+                         type="primary" if selected else "secondary"):
+                new_theme = tname
+
+    if new_theme != current_theme:
+        s["theme"] = new_theme
+        st.session_state.settings = s
+        _save_settings(s)
+        st.rerun()
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Section 2: Data Export ────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};'
+        f'letter-spacing:.05em;text-transform:uppercase;margin:8px 0 12px">Data Export</div>',
+        unsafe_allow_html=True,
+    )
+
+    res = st.session_state.get("results")
+    if res is None:
+        st.markdown(
+            f'<div style="background:{GRAY_LT};border:1px solid {BORDER};border-radius:10px;'
+            f'padding:16px 20px;color:{MUTED};font-size:13px">'
+            f'Run an analysis first to enable data export.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        exp_c1, exp_c2, exp_c3 = st.columns(3)
+        top10 = res.get("top10")
+        val   = res.get("valuation", {})
+        risk  = res.get("risk", {})
+
+        with exp_c1:
+            if top10 is not None:
+                csv_bytes = top10.to_csv(index=False).encode()
+                st.download_button(
+                    "⬇  Rankings CSV",
+                    data=csv_bytes,
+                    file_name="stock_rankings.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        with exp_c2:
+            # Build valuation summary CSV
+            rows = []
+            for t, vr in val.items():
+                if not isinstance(vr, dict):
+                    continue
+                est = vr.get("estimates", {})
+                rows.append({
+                    "ticker":        t,
+                    "fair_value":    vr.get("fair_value"),
+                    "entry_low":     vr.get("entry_low"),
+                    "target_price":  vr.get("target_price"),
+                    "signal":        vr.get("signal"),
+                    "upside_pct":    vr.get("upside_pct"),
+                    "dcf":           est.get("dcf"),
+                    "graham":        est.get("graham"),
+                    "ev_ebitda":     est.get("ev_ebitda"),
+                    "fcf_yield":     est.get("fcf_yield"),
+                })
+            if rows:
+                val_csv = pd.DataFrame(rows).to_csv(index=False).encode()
+                st.download_button(
+                    "⬇  Valuation CSV",
+                    data=val_csv,
+                    file_name="valuation_analysis.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+
+        with exp_c3:
+            # Session history JSON
+            try:
+                if os.path.exists("memory/history.json"):
+                    with open("memory/history.json", "rb") as f:
+                        hist_bytes = f.read()
+                    st.download_button(
+                        "⬇  Session History JSON",
+                        data=hist_bytes,
+                        file_name="session_history.json",
+                        mime="application/json",
+                        use_container_width=True,
+                    )
+            except Exception:
+                st.caption("History file unavailable.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Section 3: Analysis Behaviour ────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};'
+        f'letter-spacing:.05em;text-transform:uppercase;margin:8px 0 12px">Analysis Behaviour</div>',
+        unsafe_allow_html=True,
+    )
+
+    b_c1, b_c2 = st.columns(2)
+    with b_c1:
+        new_penalty = st.slider(
+            "Fresh Picks Penalty (pts)",
+            min_value=0, max_value=50, value=int(s.get("fresh_penalty", 22)), step=1,
+            help="How many points to subtract from tickers seen in recent sessions when Fresh Picks Mode is on. Higher = more aggressive rotation.",
+        )
+        new_n = st.slider(
+            "Sessions to Remember",
+            min_value=1, max_value=5, value=int(s.get("n_sessions", 2)), step=1,
+            help="Number of past sessions checked for the fresh-picks rotation penalty.",
+        )
+    with b_c2:
+        new_lr = st.slider(
+            "Adaptive Learning Rate",
+            min_value=0.01, max_value=0.15, value=float(s.get("learning_rate", 0.04)),
+            step=0.01, format="%.2f",
+            help="How aggressively factor weights adapt based on which factors predicted returns well. Takes effect on the next analysis run.",
+        )
+        new_signal = st.selectbox(
+            "Signal Mode",
+            options=["Conservative", "Balanced", "Aggressive"],
+            index=["Conservative", "Balanced", "Aggressive"].index(s.get("signal_mode", "Balanced")),
+            help=(
+                "Conservative: only STRONG BUY shown as actionable.  "
+                "Balanced: STRONG BUY + BUY (default).  "
+                "Aggressive: STRONG BUY + BUY + HOLD/WATCH all treated as buys."
+            ),
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    save_col, reset_col, _ = st.columns([1, 1, 4])
+    with save_col:
+        if st.button("💾  Save Behaviour", type="primary", use_container_width=True):
+            s["fresh_penalty"] = new_penalty
+            s["n_sessions"]    = new_n
+            s["learning_rate"] = new_lr
+            s["signal_mode"]   = new_signal
+            st.session_state.settings = s
+            _save_settings(s)
+            st.success("Settings saved.", icon="✅")
+
+    with reset_col:
+        if st.button("↺  Reset Defaults", type="secondary", use_container_width=True):
+            st.session_state.settings = dict(DEFAULT_SETTINGS)
+            _save_settings(dict(DEFAULT_SETTINGS))
+            st.rerun()
+
+    # ── Info card ─────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    sig_desc = {
+        "Conservative": "Only <b>STRONG BUY</b> signals treated as actionable. Best for cautious investors.",
+        "Balanced":     "<b>STRONG BUY</b> and <b>BUY</b> signals both actionable. Recommended default.",
+        "Aggressive":   "<b>STRONG BUY</b>, <b>BUY</b>, and <b>HOLD/WATCH</b> all considered. Higher turnover.",
+    }
+    cur_sig = s.get("signal_mode", "Balanced")
+    st.markdown(
+        f'<div style="background:{BLUE_LT};border:1px solid #BFDBFE;border-left:4px solid {BLUE};'
+        f'border-radius:10px;padding:14px 18px;font-size:13px;color:{TEXT}">'
+        f'<b>Active configuration</b> — '
+        f'Theme: <b>{s.get("theme","Light")}</b> · '
+        f'Penalty: <b>{s.get("fresh_penalty",22)} pts</b> · '
+        f'Memory: <b>{s.get("n_sessions",2)} sessions</b> · '
+        f'LR: <b>{s.get("learning_rate",0.04):.2f}</b> · '
+        f'Signal: <b>{cur_sig}</b><br><br>'
+        f'{sig_desc.get(cur_sig,"")}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    profile, run_btn, hist_btn, bt_btn = render_sidebar()
+    # Load persisted settings once per session
+    if "settings" not in st.session_state:
+        st.session_state.settings = _load_settings()
+
+    _apply_theme_css()
+
+    profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn = render_sidebar()
 
     if "results" not in st.session_state:
-        st.session_state.results           = None
-        st.session_state.profile           = None
-        st.session_state.show_history      = False
-        st.session_state.show_backtest     = False
-        st.session_state.rankings_selected = None
-        st.session_state.bt_result         = None
-        st.session_state.bt_ticker         = None
-        st.session_state.bt_period         = None
+        st.session_state.results             = None
+        st.session_state.profile             = None
+        st.session_state.show_history        = False
+        st.session_state.show_backtest       = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
+        st.session_state.rankings_selected   = None
+        st.session_state.bt_result           = None
+        st.session_state.bt_period           = None
 
     if run_btn:
-        st.session_state.show_history  = False
-        st.session_state.show_backtest = False
+        st.session_state.show_history        = False
+        st.session_state.show_backtest       = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
+        st.session_state.bt_result           = None
         with st.spinner("Running analysis…"):
             st.session_state.results = run_analysis(profile)
             st.session_state.profile = profile
         st.rerun()
 
     if hist_btn:
-        st.session_state.show_history = not st.session_state.get("show_history", False)
+        st.session_state.show_history        = not st.session_state.get("show_history", False)
+        st.session_state.show_backtest       = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
         st.rerun()
 
     if bt_btn:
-        st.session_state.show_backtest = not st.session_state.get("show_backtest", False)
-        st.session_state.show_history  = False
+        st.session_state.show_backtest       = not st.session_state.get("show_backtest", False)
+        st.session_state.show_history        = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
         st.rerun()
+
+    if cal_btn:
+        st.session_state.show_calendar       = not st.session_state.get("show_calendar", False)
+        st.session_state.show_history        = False
+        st.session_state.show_backtest       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
+        st.rerun()
+
+    if settings_btn:
+        st.session_state.show_settings       = not st.session_state.get("show_settings", False)
+        st.session_state.show_history        = False
+        st.session_state.show_backtest       = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_session_detail = None
+        st.rerun()
+
+    # ── Settings view ─────────────────────────────────────────────────────
+    if st.session_state.get("show_settings", False):
+        st.markdown(
+            f'<div class="ptitle">Stock Ranking Advisor</div>'
+            f'<div class="psub">Settings  ·  Appearance · Export · Behaviour  ·  Click "⚙️ Settings" to close</div>',
+            unsafe_allow_html=True,
+        )
+        tab_settings()
+        return
+
+    # ── Session time-machine (full historical analysis) ────────────────────
+    if st.session_state.get("show_session_detail") is not None:
+        st.markdown(
+            f'<div class="ptitle">Stock Ranking Advisor</div>'
+            f'<div class="psub">Session Replay  ·  Reconstructing historical analysis</div>',
+            unsafe_allow_html=True,
+        )
+        render_session_detail(st.session_state.show_session_detail)
+        return
 
     # ── Past Sessions view ─────────────────────────────────────────────────
     if st.session_state.get("show_history", False):
         st.markdown(
             f'<div class="ptitle">Stock Ranking Advisor</div>'
-            f'<div class="psub">Past Sessions  ·  Click "Past Sessions" in the sidebar to toggle</div>',
+            f'<div class="psub">Past Sessions  ·  Click "History" in the sidebar to toggle</div>',
             unsafe_allow_html=True,
         )
         tab_history()
         return
 
-    # ── Backtest view (works before and after analysis) ────────────────────
+    # ── Backtest view ──────────────────────────────────────────────────────
     if st.session_state.get("show_backtest", False):
         st.markdown(
             f'<div class="ptitle">Stock Ranking Advisor</div>'
-            f'<div class="psub">Backtest  ·  Simulate valuation entry strategy  ·  Click "Backtest" to close</div>',
+            f'<div class="psub">Portfolio Backtest  ·  Full 10-stock basket vs S&amp;P 500  ·  Click "Backtest" to close</div>',
             unsafe_allow_html=True,
         )
-        uni_bt  = (st.session_state.results or {}).get("universe_data", {})
-        val_bt  = (st.session_state.results or {}).get("valuation", {})
-        risk_bt = (st.session_state.results or {}).get("risk", {})
-        rf_bt   = (st.session_state.results or {}).get("rf_rate", 0.045)
-        tab_backtest(uni_bt, val_bt, risk_bt, rf_bt)
+        _res   = st.session_state.results or {}
+        top_bt = _res.get("top10")
+        uni_bt = _res.get("universe_data", {})
+        val_bt = _res.get("valuation", {})
+        rsk_bt = _res.get("risk", {})
+        rf_bt  = _res.get("rf_rate", 0.045)
+        tab_backtest(top_bt, uni_bt, val_bt, rsk_bt, rf_bt)
+        return
+
+    # ── Calendar view ──────────────────────────────────────────────────────
+    if st.session_state.get("show_calendar", False):
+        st.markdown(
+            f'<div class="ptitle">Stock Ranking Advisor</div>'
+            f'<div class="psub">Earnings Calendar  ·  Upcoming events for your portfolio  ·  Click "Calendar" to close</div>',
+            unsafe_allow_html=True,
+        )
+        _res    = st.session_state.results or {}
+        top_cal = _res.get("top10")
+        uni_cal = _res.get("universe_data", {})
+        val_cal = _res.get("valuation", {})
+        rsk_cal = _res.get("risk", {})
+        tab_calendar(top_cal, uni_cal, val_cal, rsk_cal)
         return
 
     if st.session_state.results is None:
@@ -3107,7 +4398,7 @@ def main():
 
     render_macro_strip(macro, top10, rf)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
         "Rankings",
         "Valuation",
         "Risk & Quality",
@@ -3117,17 +4408,19 @@ def main():
         "Stock Lookup",
         "History",
         "Backtest",
+        "Calendar",
     ])
 
-    with tab1: tab_rankings(top10, profile, val, proto, risk)
-    with tab2: tab_valuation(top10, val)
-    with tab3: tab_risk(top10, risk)
-    with tab4: tab_protocol(top10, proto)
-    with tab5: tab_portfolio(top10, profile)
-    with tab6: tab_macro(top10, macro, uni, sp500, profile)
-    with tab7: tab_stock_lookup(uni, val, risk, proto, rf)
-    with tab8: tab_history()
-    with tab9: tab_backtest(uni, val, risk, rf)
+    with tab1:  tab_rankings(top10, profile, val, proto, risk)
+    with tab2:  tab_valuation(top10, val)
+    with tab3:  tab_risk(top10, risk)
+    with tab4:  tab_protocol(top10, proto)
+    with tab5:  tab_portfolio(top10, profile)
+    with tab6:  tab_macro(top10, macro, uni, sp500, profile)
+    with tab7:  tab_stock_lookup(uni, val, risk, proto, rf)
+    with tab8:  tab_history()
+    with tab9:  tab_backtest(top10, uni, val, risk, rf)
+    with tab10: tab_calendar(top10, uni, val, risk)
 
 
 if __name__ == "__main__":

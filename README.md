@@ -22,12 +22,15 @@ python main.py
 pip install -r requirements.txt
 streamlit run app.py
 ```
-Opens at `http://localhost:8501` — white background, black text, 9 interactive tabs.
+Opens at `http://localhost:8501` — white background, black text, 10 interactive tabs.
 
 ---
 
 ## What's New (latest session)
 
+- **Portfolio backtest** — backtests the entire 10-stock basket simultaneously; equal-weighted equity curve vs S&P 500 with individual stock lines; 5 aggregate metrics (return, win rate, buy-and-hold, S&P 500, alpha); per-stock breakdown table — no ticker selector needed
+- **Earnings Calendar tab** — dedicated tab 10 + sidebar button; shows all 10 picks sorted by urgency (≤7d RED / ≤14d AMBER / ≤30d BLUE / >30d GRAY); hero countdown banner for nearest earnings; horizontal timeline chart; valuation signal + price vs FV on each card; earnings risk guidance
+- **History full analysis** — each session now expands into the complete picture: full profile header with exact timestamp, per-pick cards showing all 7 factor score bars, entry price, exit price + P&L (for evaluated sessions); pending sessions show an amber evaluation countdown
 - **Backtest engine** — simulate our valuation entry strategy (buy at entry zone, sell at target / stop loss) on any ticker with annotated chart, trade log, strategy vs buy-and-hold vs S&P 500
 - **Past Sessions** — `/history` CLI command + dedicated web tab + sidebar button; shows every session with win rates, alpha, and P&L
 - **Fresh picks mode** — Q8 in CLI / checkbox in web; applies a −22pt penalty to stocks from your last 2 sessions so the tool recommends new ideas each run
@@ -35,7 +38,6 @@ Opens at `http://localhost:8501` — white background, black text, 9 interactive
 - **Analyst targets panel** — consensus recommendation, # analysts, mean/high/low price targets with upside % — web and CLI
 - **Technical status panel** — plain-English SMA 200/50 positioning, 52-week range, RSI, 3M momentum — web and CLI
 - **7-factor score bars** — visual breakdown of the 7 scoring factors per stock in the detail panel
-- **Earnings calendar** — shows upcoming earnings up to 90 days out with 4 severity tiers (red ≤7d, amber ≤14d, blue ≤30d, gray ≤90d)
 - **DCF sensitivity** — Bear / Base / Bull scenario table (50% / 100% / 150% of base growth rate)
 - **Citadel-level stock detail redesign** — gradient hero header, key metrics pill strip, full-width valuation deep dive card, 3-column risk/analyst/technical section, full-width news feed, larger protocol gates
 - **Valuation estimates fix** — all 4 method estimates now display correctly everywhere
@@ -44,7 +46,7 @@ Opens at `http://localhost:8501` — white background, black text, 9 interactive
 
 ---
 
-## Streamlit Dashboard — 9 Tabs
+## Streamlit Dashboard — 10 Tabs
 
 | Tab | Contents |
 |-----|----------|
@@ -55,8 +57,9 @@ Opens at `http://localhost:8501` — white background, black text, 9 interactive
 | **Portfolio** | Donut allocation chart; position breakdown table with weight bars |
 | **Macro & Performance** | VIX + 10Y yield tiles; sector ETF returns; normalised price history vs S&P 500; correlation heatmap |
 | **Stock Lookup** | Search any ticker — full quant detail: candlestick chart, news, valuation, risk, protocol, analyst targets, technical status |
-| **History** | Past sessions with per-session P&L, win rate vs S&P 500, alpha, evaluated returns per pick |
-| **Backtest** | Simulate the valuation entry strategy on historical prices — trade log, annotated chart, vs buy-and-hold and S&P 500 |
+| **History** | Per-session expanders showing full pick cards with all 7 factor bars, entry price, exit P&L; aggregate win rate / alpha tiles |
+| **Backtest** | Portfolio-wide backtest: all 10 picks simultaneously; equal-weighted equity curve vs S&P 500; 5 aggregate tiles; per-stock breakdown table |
+| **Calendar** | Earnings timeline for all 10 picks sorted by urgency; hero countdown banner; horizontal bar chart; valuation signal on each card; event-risk guidance |
 
 ---
 
@@ -133,7 +136,7 @@ The backtest simulates our valuation entry strategy on historical daily closing 
 | **Take profit** | Price ≥ target (FV × 1.20) | Sell — 20% above fair value |
 | **Stop loss** | Price ≤ stop (entry_low × 0.92) | Sell — 8% below entry |
 
-**Output:** Strategy return, win rate, buy-and-hold return, S&P 500 return, alpha, annotated price chart, per-trade log.
+**Output:** Equal-weighted portfolio return, win rate, buy-and-hold, S&P 500, alpha vs benchmark, multi-line equity curve chart, per-stock breakdown table, per-trade log per stock.
 
 > Note: uses current fundamental data — historical fundamentals vary, so treat as illustrative.
 
@@ -267,7 +270,7 @@ Every session is saved to `memory/history.json`. After 30+ days:
 ```
 portfolio/
 ├── main.py                 ← CLI pipeline (16 steps) + interactive command loop
-├── app.py                  ← Streamlit dashboard (9 tabs)
+├── app.py                  ← Streamlit dashboard (10 tabs)
 ├── config.py               ← Universe, weight matrix, sector multiples, optional API keys
 ├── requirements.txt
 ├── .streamlit/config.toml  ← Streamlit theme
