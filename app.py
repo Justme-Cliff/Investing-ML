@@ -401,20 +401,22 @@ def zone_badge(zone):
     c, bg = ZONE_META.get(zone, (MUTED, GRAY_LT))
     return badge(zone, c, bg)
 
+_NA = f'<span style="color:{BORDER};font-size:11px">n/a</span>'
+
 def fmt_price(v):
-    if v is None: return "—"
+    if v is None: return _NA
     try:    return f"${float(v):,.2f}"
-    except: return "—"
+    except: return _NA
 
 def fmt_pct(v, plus=True):
-    if v is None: return "—"
+    if v is None: return _NA
     try:    return f"{float(v):+.1f}%" if plus else f"{float(v):.1f}%"
-    except: return "—"
+    except: return _NA
 
 def fmt_2(v):
-    if v is None: return "—"
+    if v is None: return _NA
     try:    return f"{float(v):.2f}"
-    except: return "—"
+    except: return _NA
 
 def score_color(s):
     s = s or 0
@@ -863,8 +865,12 @@ def render_sidebar():
         )
 
         st.divider()
-        run_btn  = st.button("Run Analysis",   type="primary",    use_container_width=True)
-        hist_btn = st.button("Past Sessions",  type="secondary",  use_container_width=True)
+        run_btn   = st.button("Run Analysis",   type="primary",    use_container_width=True)
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            hist_btn = st.button("Past Sessions", type="secondary", use_container_width=True)
+        with col_b2:
+            bt_btn   = st.button("Backtest",      type="secondary", use_container_width=True)
 
     profile = UserProfile(
         portfolio_size    = float(portfolio_size),
@@ -881,7 +887,7 @@ def render_sidebar():
         existing_tickers  = existing_tickers,
         avoid_recent      = avoid_recent,
     )
-    return profile, run_btn, hist_btn
+    return profile, run_btn, hist_btn, bt_btn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1897,16 +1903,7 @@ def _render_stock_detail(
     period:      str = "1y",
     fetch_fresh: bool = False,
 ):
-    """
-    Full per-stock detail view:
-      - Candlestick chart
-      - News feed (multi-source)
-      - Valuation breakdown
-      - Risk & quality metrics
-      - Protocol gate scores
-      - Key financials grid
-    """
-    # ── Fetch data if needed ───────────────────────────────────────────────────
+    # ── Fetch data if needed ──────────────────────────────────────────────────
     if fetch_fresh and ticker not in universe_data:
         with st.spinner(f"Fetching data for {ticker}…"):
             fetcher    = DataFetcher("2y")
@@ -1918,7 +1915,6 @@ def _render_stock_detail(
     info = data.get("info", {})
     hist = data.get("history")
 
-    # ── Header ────────────────────────────────────────────────────────────────
     name    = info.get("longName", ticker)
     price   = info.get("currentPrice") or info.get("regularMarketPrice")
     mktcap  = info.get("marketCap", 0)
@@ -1926,7 +1922,7 @@ def _render_stock_detail(
     website = info.get("website", "")
     mktcap_s = (f"${mktcap/1e12:.2f}T" if mktcap >= 1e12
                 else f"${mktcap/1e9:.1f}B" if mktcap >= 1e9
-                else "—")
+                else "n/a")
 
     val  = valuation.get(ticker, {})
     r    = risk.get(ticker, {})
@@ -1934,343 +1930,503 @@ def _render_stock_detail(
     c_sig, bg_sig, lbl_sig = SIGNAL_META.get(sig, (MUTED, GRAY_LT, sig))
     az   = r.get("altman_z", {})
 
+    # ── HERO HEADER ──────────────────────────────────────────────────────────
+    sig_accent = SIGNAL_ACCENT.get(sig, BORDER)
+    price_chg  = ""
+    if hist is not None and not hist.empty and price:
+        try:
+            prev = float(hist["Close"].dropna().iloc[-2])
+            chg  = ((float(price) - prev) / prev) * 100
+            chg_col = GREEN if chg >= 0 else RED
+            price_chg = f'<span style="font-size:16px;font-weight:600;color:{chg_col};margin-left:10px">{chg:+.2f}%</span>'
+        except Exception:
+            pass
+
+    website_html = ""
+    if website:
+        domain = website.replace("https://","").replace("http://","").rstrip("/")
+        website_html = f'<a href="{website}" target="_blank" style="color:{BLUE};text-decoration:none;font-size:12px">{domain}</a>  ·  '
+
     st.markdown(
-        f'<div style="display:flex;align-items:flex-start;justify-content:space-between;'
-        f'padding:20px 0 16px;border-bottom:1px solid {BORDER};margin-bottom:20px">'
-        f'  <div>'
-        f'    <div style="font-size:26px;font-weight:900;color:{TEXT};letter-spacing:-.03em">{ticker}</div>'
-        f'    <div style="font-size:14px;color:{MUTED};margin-top:3px">{name}</div>'
-        f'    <div style="font-size:12px;color:{MUTED2};margin-top:2px">{sector}'
-        f'      {" · <a href=" + website + " target=_blank style=color:" + BLUE + ">" + website + "</a>" if website else ""}'
+        f'<div style="background:linear-gradient(135deg,{GRAY_LT} 0%,#ffffff 100%);'
+        f'border:1px solid {BORDER};border-left:5px solid {sig_accent};'
+        f'border-radius:12px;padding:22px 26px 18px;margin-bottom:20px">'
+        f'  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">'
+        f'    <div>'
+        f'      <div style="font-size:32px;font-weight:900;color:{TEXT};letter-spacing:-.04em;line-height:1">{ticker}</div>'
+        f'      <div style="font-size:15px;font-weight:600;color:{MUTED};margin-top:5px">{name}</div>'
+        f'      <div style="font-size:12px;color:{MUTED2};margin-top:4px">'
+        f'        {website_html}{sector}  ·  Market Cap {mktcap_s}'
+        f'      </div>'
         f'    </div>'
-        f'  </div>'
-        f'  <div style="text-align:right">'
-        f'    <div style="font-size:28px;font-weight:800;color:{TEXT};font-variant-numeric:tabular-nums">'
-        f'      {"${:,.2f}".format(price) if price else "—"}'
+        f'    <div style="text-align:right">'
+        f'      <div style="display:flex;align-items:baseline;gap:4px;justify-content:flex-end">'
+        f'        <span style="font-size:36px;font-weight:900;color:{TEXT};font-variant-numeric:tabular-nums">'
+        f'          {"${:,.2f}".format(price) if price else "—"}'
+        f'        </span>'
+        f'        {price_chg}'
+        f'      </div>'
+        f'      <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">'
+        f'        <span class="badge" style="font-size:11px;font-weight:700;color:{c_sig};background:{bg_sig};padding:4px 10px">{lbl_sig}</span>'
+        f'        {zone_badge(az.get("zone","")) if az.get("zone") else ""}'
+        f'      </div>'
         f'    </div>'
-        f'    <div style="margin-top:6px;display:flex;gap:6px;justify-content:flex-end">'
-        f'      <span class="badge" style="color:{c_sig};background:{bg_sig}">{lbl_sig}</span>'
-        f'      {zone_badge(az.get("zone","")) if az.get("zone") else ""}'
-        f'    </div>'
-        f'    <div style="font-size:11px;color:{MUTED2};margin-top:5px">Mkt Cap {mktcap_s}</div>'
         f'  </div>'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # ── Earnings warning banner ───────────────────────────────────────────────
+    # ── EARNINGS BANNER ───────────────────────────────────────────────────────
     days_away = data.get("earnings_days_away")
     edate     = data.get("earnings_date", "")
-    if days_away is not None and days_away <= 30:
+    if days_away is not None and days_away <= 90:
         if days_away <= 7:
             earn_c, earn_bg = RED, "#FEF2F2"
-            earn_msg = f"Earnings in {days_away} days ({edate}) — consider waiting for results before entering"
+            earn_icon = "⚠"
+            earn_msg = f"Earnings in {days_away} days ({edate}) — high event risk, consider waiting for results"
         elif days_away <= 14:
             earn_c, earn_bg = AMBER, "#FFFBEB"
-            earn_msg = f"Earnings in {days_away} days ({edate}) — elevated event risk, size position accordingly"
-        else:
+            earn_icon = "!"
+            earn_msg = f"Earnings in {days_away} days ({edate}) — elevated risk, size position carefully"
+        elif days_away <= 30:
             earn_c, earn_bg = BLUE, BLUE_LT
+            earn_icon = "i"
             earn_msg = f"Earnings in {days_away} days ({edate})"
+        else:
+            earn_c, earn_bg = MUTED, GRAY_LT
+            earn_icon = "cal"
+            earn_msg = f"Next earnings: {edate} ({days_away} days)"
         st.markdown(
             f'<div style="background:{earn_bg};border-left:4px solid {earn_c};'
-            f'border-radius:6px;padding:10px 14px;margin-bottom:16px;font-size:13px;'
-            f'font-weight:600;color:{earn_c}">{earn_msg}</div>',
+            f'border-radius:8px;padding:11px 16px;margin-bottom:16px;font-size:13px;'
+            f'font-weight:600;color:{earn_c};display:flex;align-items:center;gap:8px">'
+            f'<span style="font-size:16px">{earn_icon}</span> {earn_msg}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    elif days_away is None:
+        st.markdown(
+            f'<div style="background:{GRAY_LT};border-left:4px solid {BORDER};'
+            f'border-radius:8px;padding:8px 16px;margin-bottom:16px;font-size:12px;'
+            f'color:{MUTED2}">Earnings date not available from data provider</div>',
             unsafe_allow_html=True,
         )
 
-    # ── Quant Thesis ──────────────────────────────────────────────────────────
-    proto_map_local = {p["ticker"]: p for p in protocol}
+    # ── QUANT THESIS ──────────────────────────────────────────────────────────
+    proto_map_local  = {p["ticker"]: p for p in protocol}
     proto_for_ticker = proto_map_local.get(ticker, {})
     thesis_html = _generate_quant_thesis(ticker, val, r, proto_for_ticker)
     if thesis_html:
-        sig_accent = SIGNAL_ACCENT.get(sig, BORDER)
         st.markdown(
-            f'<div style="background:{GRAY_LT};border-left:4px solid {sig_accent};'
-            f'border-radius:8px;padding:14px 18px;margin-bottom:16px;'
-            f'font-size:13px;line-height:1.75;color:{TEXT}">'
-            f'<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
-            f'letter-spacing:.09em;color:{MUTED2};margin-bottom:6px">Quant Thesis</div>'
-            f'{thesis_html}'
+            f'<div style="background:#F8FAFF;border:1px solid #DBEAFE;border-left:4px solid {sig_accent};'
+            f'border-radius:10px;padding:16px 20px;margin-bottom:18px">'
+            f'<div style="font-size:10px;font-weight:800;text-transform:uppercase;'
+            f'letter-spacing:.10em;color:{BLUE};margin-bottom:8px">Quant Thesis</div>'
+            f'<div style="font-size:13.5px;line-height:1.8;color:{TEXT}">{thesis_html}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
-    # ── Business description ──────────────────────────────────────────────────
-    desc = (info.get("longBusinessSummary") or "")[:400]
+    # ── BUSINESS DESCRIPTION ──────────────────────────────────────────────────
+    desc = (info.get("longBusinessSummary") or "")[:420]
     if desc:
-        st.markdown(
-            f'<div style="font-size:13px;color:{MUTED};line-height:1.7;margin-bottom:18px">'
-            f'{desc}{"…" if len(desc)==400 else ""}</div>',
-            unsafe_allow_html=True,
-        )
+        with st.expander("Business description", expanded=False):
+            st.markdown(
+                f'<div style="font-size:13px;color:{MUTED};line-height:1.75">'
+                f'{desc}{"…" if len(desc)==420 else ""}</div>',
+                unsafe_allow_html=True,
+            )
 
-    # ── Factor Score Bars (if available from ranked_df) ───────────────────────
+    # ── KEY METRICS STRIP ─────────────────────────────────────────────────────
+    def _quick_pct(key, mult=100):
+        v = info.get(key)
+        if v is None: return "n/a"
+        try: return f"{float(v)*mult:.1f}%"
+        except: return "n/a"
+    def _quick_n(key, fmt=".1f"):
+        v = info.get(key)
+        if v is None: return "n/a"
+        try: return format(float(v), fmt)
+        except: return "n/a"
+
+    pf    = r.get("piotroski", {})
+    rw    = r.get("roic_wacc", {})
+    sharpe_v = r.get("sharpe")
+
+    metrics = [
+        ("P/E",           _quick_n("trailingPE", ".1f"),  MUTED),
+        ("Forward P/E",   _quick_n("forwardPE",  ".1f"),  MUTED),
+        ("EV/EBITDA",     _quick_n("enterpriseToEbitda", ".1f"), MUTED),
+        ("Gross Margin",  _quick_pct("grossMargins"),     MUTED),
+        ("ROE",           _quick_pct("returnOnEquity"),   MUTED),
+        ("Beta",          _quick_n("beta", ".2f"),         MUTED),
+        ("Piotroski",     f'{pf.get("score","n/a")}/9' if pf.get("score") is not None else "n/a",
+                          GREEN if (pf.get("score") or 0) >= 7 else RED if (pf.get("score") or 0) <= 3 else AMBER),
+        ("Altman Z",      f'{az.get("score","n/a"):.2f} [{az.get("zone","?")}]' if az.get("score") else "n/a",
+                          GREEN if az.get("zone") == "SAFE" else RED if az.get("zone") == "DISTRESS" else AMBER),
+        ("Sharpe",        f'{sharpe_v:.2f}' if sharpe_v else "n/a",
+                          GREEN if (sharpe_v or 0) > 1.2 else RED if (sharpe_v or 0) < 0.5 else AMBER),
+    ]
+    pills = "".join(
+        f'<div style="background:#fff;border:1px solid {BORDER};border-radius:8px;'
+        f'padding:10px 14px;text-align:center;min-width:90px">'
+        f'<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:.08em;color:{MUTED2};margin-bottom:5px">{lbl}</div>'
+        f'<div style="font-size:15px;font-weight:800;color:{col};font-variant-numeric:tabular-nums">{val2}</div>'
+        f'</div>'
+        for lbl, val2, col in metrics
+    )
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:22px">{pills}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── FACTOR SCORE BARS ─────────────────────────────────────────────────────
     factor_bars = _factor_bars_html(ticker)
     if factor_bars:
-        st.markdown(shdr("7-Factor Score Breakdown"), unsafe_allow_html=True)
-        st.markdown(factor_bars, unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander("7-Factor Score Breakdown", expanded=False):
+            st.markdown(factor_bars, unsafe_allow_html=True)
 
-    # ── Candlestick chart ─────────────────────────────────────────────────────
-    st.markdown(shdr("Price Chart"), unsafe_allow_html=True)
+    # ── CANDLESTICK CHART ─────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:8px">Price Chart</div>',
+        unsafe_allow_html=True,
+    )
     if hist is not None and not hist.empty:
-        # Strip tz from index
         try:
-            hist = hist.copy()
-            if hist.index.tz is not None:
-                hist.index = hist.index.tz_localize(None)
+            hist_c = hist.copy()
+            if hasattr(hist_c.index, "tz") and hist_c.index.tz is not None:
+                hist_c.index = hist_c.index.tz_localize(None)
+            st.plotly_chart(_candlestick_fig(ticker, hist_c, period), use_container_width=True)
         except Exception:
-            pass
-        st.plotly_chart(_candlestick_fig(ticker, hist, period),
-                        use_container_width=True)
+            st.info("Chart unavailable.")
     else:
         st.info("Price history not available.")
 
-    # ── Two-column: news | financials ─────────────────────────────────────────
-    col_news, col_fin = st.columns([3, 2])
+    # ── VALUATION DEEP DIVE (full width card) ─────────────────────────────────
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin:6px 0 12px">Valuation Deep Dive</div>',
+        unsafe_allow_html=True,
+    )
+    est = val.get("estimates", {})
+    current_price = price or 0
+    fv   = val.get("fair_value")
+    el   = val.get("entry_low")
+    eh   = val.get("entry_high")
+    sl   = val.get("stop_loss")
+    rr   = val.get("rr_ratio")
+    upd  = val.get("upside_pct")
+    tgt  = val.get("target_price")
+    prem = val.get("premium_pct")
+    mc   = val.get("methods_count", 0)
 
-    with col_news:
-        st.markdown(shdr("Latest News", "Multi-source · sentiment scored"),
-                    unsafe_allow_html=True)
-        with st.spinner("Loading news…"):
-            articles = NewsFetcher().fetch_ticker_news(ticker, n=10)
+    method_rows = [
+        ("DCF (2-stage)",    est.get("dcf"),      "2-stage FCF model, rf + 5.5% discount"),
+        ("Graham Number",    est.get("graham"),    "√(22.5 × EPS × Book Value)"),
+        ("EV/EBITDA Target", est.get("ev_ebitda"), "Sector-median multiple → implied price"),
+        ("FCF Yield @4.5%",  est.get("fcf_yield"), "FCF/share ÷ 4.5% target yield"),
+    ]
 
-        if not articles:
-            st.caption("No news found.")
-        else:
-            score = NewsFetcher().score_sentiment([a["title"] for a in articles])
-            sc_color = GREEN if score >= 60 else RED if score < 40 else AMBER
-            st.markdown(
-                f'<div style="margin-bottom:10px">'
-                f'  <span class="badge" style="color:{sc_color};'
-                f'background:{"#ECFDF5" if score>=60 else "#FEF2F2" if score<40 else "#FFFBEB"}">'
-                f'Sentiment {score:.0f}/100'
-                f'  </span>'
-                f'  <span style="font-size:11px;color:{MUTED2};margin-left:8px">'
-                f'  {len(articles)} sources</span>'
-                f'</div>',
-                unsafe_allow_html=True,
+    val_rows_html = ""
+    for method, ep, desc_txt in method_rows:
+        if ep is None:
+            val_rows_html += (
+                f'<tr>'
+                f'<td style="padding:10px 16px">'
+                f'  <div style="font-weight:600;font-size:13px;color:{TEXT}">{method}</div>'
+                f'  <div style="font-size:11px;color:{MUTED2};margin-top:2px">{desc_txt}</div>'
+                f'</td>'
+                f'<td style="padding:10px 16px;text-align:right;font-size:12px;color:{MUTED2}">Insufficient data</td>'
+                f'<td style="padding:10px 16px"></td>'
+                f'</tr>'
             )
-            for a in articles:
-                hint     = a.get("sentiment_hint", "neutral")
-                dot_col  = GREEN if hint == "positive" else RED if hint == "negative" else MUTED2
-                st.markdown(
-                    f'<div style="padding:8px 0;border-bottom:1px solid {BORDER}">'
-                    f'  <div style="display:flex;align-items:flex-start;gap:8px">'
-                    f'    <span style="color:{dot_col};font-size:10px;margin-top:3px">●</span>'
-                    f'    <div>'
-                    f'      <div style="font-size:13px;font-weight:500;color:{TEXT};line-height:1.45">'
-                    f'        {"<a href=" + a["url"] + " target=_blank style=color:" + TEXT + ";text-decoration:none>" + a["title"] + "</a>" if a.get("url") else a["title"]}'
-                    f'      </div>'
-                    f'      <div style="font-size:10.5px;color:{MUTED2};margin-top:3px">'
-                    f'        {a.get("source","—")}  ·  {a.get("published","—")}'
-                    f'      </div>'
-                    f'    </div>'
-                    f'  </div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
-    with col_fin:
-        st.markdown(shdr("Key Financials"), unsafe_allow_html=True)
-        def _v(val, fmt=".2f", pct=False):
-            if val is None: return "—"
-            try:
-                f = float(val)
-                if pct: return f"{f*100:.1f}%"
-                return format(f, fmt)
-            except: return "—"
-
-        rows_fin = [
-            ("P/E (TTM)",       _v(info.get("trailingPE"),   ".1f")),
-            ("Forward P/E",     _v(info.get("forwardPE"),    ".1f")),
-            ("PEG Ratio",       _v(info.get("pegRatio"),     ".2f")),
-            ("EV/EBITDA",       _v(info.get("enterpriseToEbitda"), ".1f")),
-            ("Price/Book",      _v(info.get("priceToBook"),  ".2f")),
-            ("Revenue Growth",  _v(info.get("revenueGrowth"),     pct=True)),
-            ("Gross Margin",    _v(info.get("grossMargins"),       pct=True)),
-            ("Operating Margin",_v(info.get("operatingMargins"),   pct=True)),
-            ("Net Margin",      _v(info.get("profitMargins"),      pct=True)),
-            ("ROE",             _v(info.get("returnOnEquity"),     pct=True)),
-            ("ROA",             _v(info.get("returnOnAssets"),     pct=True)),
-            ("Debt / Equity",   _v(info.get("debtToEquity"),  ".2f")),
-            ("Current Ratio",   _v(info.get("currentRatio"),  ".2f")),
-            ("Free Cash Flow",  ("${:,.0f}M".format(float(info["freeCashflow"])/1e6)
-                                  if info.get("freeCashflow") else "—")),
-            ("Dividend Yield",  _v(info.get("dividendYield"), pct=True)),
-            ("Beta",            _v(info.get("beta"),          ".2f")),
-            ("52W High",        ("${:,.2f}".format(float(info["fiftyTwoWeekHigh"]))
-                                  if info.get("fiftyTwoWeekHigh") else "—")),
-            ("52W Low",         ("${:,.2f}".format(float(info["fiftyTwoWeekLow"]))
-                                  if info.get("fiftyTwoWeekLow") else "—")),
-        ]
-        fin_rows_html = "".join(
-            f'<tr><td style="color:{MUTED};padding:7px 14px;font-size:12.5px">{k}</td>'
-            f'<td style="font-family:monospace;font-weight:600;padding:7px 14px;'
-            f'font-size:12.5px;text-align:right">{v}</td></tr>'
-            for k, v in rows_fin
+            continue
+        diff = ((current_price / ep) - 1) * 100 if ep else 0
+        dc   = RED if diff > 5 else GREEN if diff < -10 else AMBER
+        dir_lbl = "premium" if diff > 0 else "discount"
+        val_rows_html += (
+            f'<tr style="border-bottom:1px solid {BORDER}">'
+            f'<td style="padding:10px 16px">'
+            f'  <div style="font-weight:600;font-size:13px;color:{TEXT}">{method}</div>'
+            f'  <div style="font-size:11px;color:{MUTED2};margin-top:2px">{desc_txt}</div>'
+            f'</td>'
+            f'<td style="padding:10px 16px;text-align:right">'
+            f'  <span style="font-size:18px;font-weight:800;font-family:monospace;color:{TEXT}">${ep:,.2f}</span>'
+            f'</td>'
+            f'<td style="padding:10px 16px;text-align:right">'
+            f'  <span style="font-size:13px;font-weight:700;color:{dc}">{diff:+.1f}% {dir_lbl}</span>'
+            f'</td>'
+            f'</tr>'
         )
+
+    # Entry / target / stop summary bar
+    summary_html = ""
+    if fv:
+        prem_c = RED if (prem or 0) > 10 else GREEN if (prem or 0) < -10 else AMBER
+        prem_lbl = "above FV" if (prem or 0) > 0 else "below FV"
+        summary_html = (
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));'
+            f'gap:12px;padding:16px;background:{GRAY_LT};border-radius:0 0 10px 10px">'
+            + "".join([
+                f'<div style="text-align:center">'
+                f'<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:{MUTED2};margin-bottom:4px">{lbl}</div>'
+                f'<div style="font-size:{"18" if i==0 else "15"}px;font-weight:800;color:{clr};font-variant-numeric:tabular-nums">{val_s}</div>'
+                f'</div>'
+                for i, (lbl, val_s, clr) in enumerate([
+                    (f"{mc}-Method FV", f"${fv:,.2f}", TEXT),
+                    ("Entry Zone",      f"${el:,.2f}" if el else "n/a", GREEN),
+                    ("Target",          f"${tgt:,.2f}" if tgt else "n/a", BLUE),
+                    ("Stop Loss",       f"${sl:,.2f}" if sl else "n/a", RED),
+                    ("R/R Ratio",       f"{rr:.1f}:1" if rr else "n/a", BLUE),
+                    ("Upside",          f"{upd:+.1f}%" if upd else "n/a", GREEN if (upd or 0)>0 else RED),
+                    ("Premium/Disc",    f"{prem:+.1f}%" if prem is not None else "n/a", prem_c),
+                ])
+            ])
+            + "</div>"
+        )
+
+    st.markdown(
+        f'<div style="border:1px solid {BORDER};border-radius:10px;overflow:hidden;margin-bottom:20px">'
+        f'<table style="width:100%;border-collapse:collapse"><tbody>{val_rows_html}</tbody></table>'
+        f'{summary_html}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # DCF Sensitivity
+    sens = (valuation.get(ticker) or {}).get("sensitivity", {})
+    if sens:
         st.markdown(
-            f'<table class="qt" style="width:100%"><tbody>{fin_rows_html}</tbody></table>',
+            f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;'
+            f'letter-spacing:.08em;color:{MUTED2};margin:0 0 8px">DCF Sensitivity — Bear / Base / Bull</div>',
             unsafe_allow_html=True,
         )
-
-        # ── Analyst Targets ────────────────────────────────────────────────────
-        analyst_html = _analyst_targets_html(info)
-        if analyst_html:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(shdr("Analyst Targets"), unsafe_allow_html=True)
-            st.markdown(analyst_html, unsafe_allow_html=True)
-
-        # ── Technical Status ──────────────────────────────────────────────────
-        tech_html = _technical_summary_html(info, hist)
-        if tech_html:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(shdr("Technical Status"), unsafe_allow_html=True)
-            st.markdown(tech_html, unsafe_allow_html=True)
-
-    # ── Valuation + Risk in two columns ──────────────────────────────────────
-    st.markdown("<br>", unsafe_allow_html=True)
-    col_v, col_r = st.columns(2)
-
-    with col_v:
-        st.markdown(shdr("Valuation Detail"), unsafe_allow_html=True)
-        est = val.get("estimates", {})
-        current_price = price or 0
-        methods = [
-            ("DCF (2-stage)",    est.get("dcf")),
-            ("Graham Number",    est.get("graham")),
-            ("EV/EBITDA target", est.get("ev_ebitda")),
-            ("FCF Yield @4.5%",  est.get("fcf_yield")),
-        ]
-        vrows = ""
-        for method, ep in methods:
-            if ep is None:
-                vrows += f'<tr><td>{method}</td><td>—</td><td>—</td></tr>'
-                continue
-            diff = ((current_price / ep) - 1) * 100 if ep else 0
-            dc   = RED if diff > 5 else GREEN if diff < -10 else AMBER
-            vrows += (
-                f'<tr>'
-                f'<td style="color:{MUTED};font-size:12.5px;padding:7px 14px">{method}</td>'
-                f'<td style="font-family:monospace;font-size:12.5px;padding:7px 14px">${ep:,.2f}</td>'
-                f'<td style="font-family:monospace;font-size:12.5px;padding:7px 14px;'
-                f'color:{dc};font-weight:600">{diff:+.1f}%</td>'
+        s_rows = ""
+        for sname, sv in sens.items():
+            sfv   = sv.get("fair_value")
+            sgr   = sv.get("growth_rate")
+            ssig  = sv.get("signal", "INSUFFICIENT_DATA")
+            sprem = sv.get("premium_pct")
+            sc_s, sbg_s, slbl_s = SIGNAL_META.get(ssig, (MUTED, GRAY_LT, ssig))
+            sp_clr = RED if (sprem or 0) > 5 else GREEN if (sprem or 0) < -10 else AMBER
+            row_bg = "#FFFBEB" if sname == "Base" else "#FAFAFA"
+            s_rows += (
+                f'<tr style="background:{row_bg};border-bottom:1px solid {BORDER}">'
+                f'<td style="font-weight:800;color:{MUTED};padding:9px 16px;font-size:12px">{sname}</td>'
+                f'<td style="font-family:monospace;color:{MUTED};padding:9px 16px;font-size:12px">{sgr:+.1f}% growth</td>'
+                f'<td style="font-family:monospace;font-weight:800;font-size:14px;padding:9px 16px">{fmt_price(sfv)}</td>'
+                f'<td style="font-family:monospace;color:{sp_clr};font-weight:700;padding:9px 16px">'
+                f'  {sprem:+.1f}% vs current' if sprem is not None else "n/a"
+                f'</td>'
+                f'<td style="padding:9px 16px"><span class="badge" style="color:{sc_s};background:{sbg_s}">{slbl_s}</span></td>'
                 f'</tr>'
             )
         st.markdown(
-            f'<table class="qt"><thead><tr>'
-            f'<th>Method</th><th>Estimate</th><th>vs Current</th>'
-            f'</tr></thead><tbody>{vrows}</tbody></table>',
+            f'<div style="border:1px solid {BORDER};border-radius:10px;overflow:hidden;margin-bottom:22px">'
+            f'<table style="width:100%;border-collapse:collapse"><tbody>{s_rows}</tbody></table></div>',
             unsafe_allow_html=True,
         )
-        fv  = val.get("fair_value")
-        el  = val.get("entry_low")
-        sl  = val.get("stop_loss")
-        rr  = val.get("rr_ratio")
-        upd = val.get("upside_pct")
-        if fv:
-            st.markdown(
-                f'<div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">'
-                f'{_stat("Fair Value", fmt_price(fv))}'
-                f'{_stat("Entry Zone", fmt_price(el), GREEN)}'
-                f'{_stat("Stop Loss",  fmt_price(sl), RED)}'
-                f'</div>'
-                f'<div style="margin-top:8px;display:grid;grid-template-columns:1fr 1fr;gap:8px">'
-                f'{_stat("R/R Ratio",   f"{rr:.1f}:1" if rr else "—", BLUE)}'
-                f'{_stat("Upside",      f"{upd:+.1f}%" if upd else "—", GREEN if (upd or 0)>0 else RED)}'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
 
-        # DCF sensitivity mini-table
-        sens = (valuation.get(ticker) or {}).get("sensitivity", {})
-        if sens:
-            st.markdown(
-                f'<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
-                f'letter-spacing:.08em;color:{MUTED2};margin:14px 0 6px">DCF Sensitivity</div>',
-                unsafe_allow_html=True,
-            )
-            s_rows = ""
-            cur_p  = price or 0
-            for sname, sv in sens.items():
-                sfv   = sv.get("fair_value")
-                sgr   = sv.get("growth_rate")
-                ssig  = sv.get("signal", "—")
-                sprem = sv.get("premium_pct")
-                sc_s, sbg_s, slbl_s = SIGNAL_META.get(ssig, (MUTED, GRAY_LT, ssig))
-                sp_clr = RED if (sprem or 0) > 5 else GREEN if (sprem or 0) < -10 else AMBER
-                row_bg = "#FFFBEB" if sname == "Base" else "#FFFFFF"
-                s_rows += (
-                    f'<tr style="background:{row_bg}">'
-                    f'<td style="font-weight:700;color:{MUTED}">{sname}</td>'
-                    f'<td style="font-family:monospace;color:{MUTED}">{sgr:+.1f}%</td>'
-                    f'<td style="font-family:monospace;font-weight:700">{fmt_price(sfv)}</td>'
-                    f'<td style="font-family:monospace;color:{sp_clr};font-weight:600">{fmt_pct(sprem)}</td>'
-                    f'<td><span class="badge" style="color:{sc_s};background:{sbg_s};font-size:9px">{slbl_s}</span></td>'
-                    f'</tr>'
-                )
-            st.markdown(
-                f'<table class="qt"><thead><tr>'
-                f'<th>Scenario</th><th>Growth</th><th>DCF Fair Value</th><th>Premium</th><th>Signal</th>'
-                f'</tr></thead><tbody>{s_rows}</tbody></table>',
-                unsafe_allow_html=True,
-            )
+    # ── RISK & QUALITY + ANALYST + TECHNICAL (3 columns) ─────────────────────
+    col_risk, col_analyst, col_tech = st.columns([1, 1, 1])
 
-    with col_r:
-        st.markdown(shdr("Risk & Quality"), unsafe_allow_html=True)
-        rw = r.get("roic_wacc", {})
-        pf = r.get("piotroski", {})
+    with col_risk:
+        st.markdown(
+            f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:12px">Risk & Quality</div>',
+            unsafe_allow_html=True,
+        )
         risk_rows = [
-            ("Altman Z-Score", f'{r.get("altman_z",{}).get("score","—"):.2f}  [{az.get("zone","—")}]' if az.get("score") else "—"),
-            ("Sharpe Ratio",   fmt_2(r.get("sharpe"))),
-            ("Sortino Ratio",  fmt_2(r.get("sortino"))),
-            ("Max Drawdown",   fmt_pct(r.get("max_drawdown_pct"), False)),
-            ("VaR 95% (1mo)",  fmt_pct(r.get("var_95_pct"), False)),
-            ("ROIC",           f'{rw.get("roic","—"):.1f}%' if rw.get("roic") else "—"),
-            ("WACC",           f'{rw.get("wacc","—"):.1f}%' if rw.get("wacc") else "—"),
-            ("ROIC/WACC Spread", f'{rw.get("spread","—"):+.1f}%' if rw.get("spread") is not None else "—"),
-            ("ROIC/WACC Verdict", rw.get("verdict","—")),
-            ("Piotroski F-Score", f'{pf.get("score","—")}/9  {pf.get("interpretation","")}'.strip() if pf.get("score") is not None else "—"),
-            ("Accruals Ratio", fmt_2(r.get("accruals"))),
-            ("Gross Profit/Assets", fmt_2(r.get("gross_prof"))),
+            ("Altman Z",
+             f'{az.get("score","n/a"):.2f}' if az.get("score") else "n/a",
+             az.get("zone",""),
+             GREEN if az.get("zone")=="SAFE" else RED if az.get("zone")=="DISTRESS" else AMBER),
+            ("Sharpe Ratio",    fmt_2(r.get("sharpe")),      "",
+             GREEN if (r.get("sharpe") or 0)>1.2 else RED if (r.get("sharpe") or 0)<0.5 else AMBER),
+            ("Sortino Ratio",   fmt_2(r.get("sortino")),     "",
+             GREEN if (r.get("sortino") or 0)>1.5 else RED if (r.get("sortino") or 0)<0.5 else AMBER),
+            ("Max Drawdown",    fmt_pct(r.get("max_drawdown_pct"), False), "",  RED),
+            ("VaR 95% (1mo)",   fmt_pct(r.get("var_95_pct"), False),       "",  AMBER),
+            ("ROIC",            f'{rw.get("roic","n/a"):.1f}%' if rw.get("roic") else "n/a", "", BLUE),
+            ("WACC",            f'{rw.get("wacc","n/a"):.1f}%' if rw.get("wacc") else "n/a", "", MUTED),
+            ("ROIC/WACC Spread",f'{rw.get("spread","n/a"):+.1f}%' if rw.get("spread") is not None else "n/a", rw.get("verdict",""),
+             GREEN if (rw.get("spread") or 0)>8 else RED if (rw.get("spread") or 0)<0 else AMBER),
+            ("Piotroski",
+             f'{pf.get("score","n/a")}/9' if pf.get("score") is not None else "n/a",
+             pf.get("interpretation",""),
+             GREEN if (pf.get("score") or 0)>=7 else RED if (pf.get("score") or 0)<=3 else AMBER),
+            ("Accruals Ratio",  fmt_2(r.get("accruals")),    "",  MUTED),
+            ("Gross Profit/Assets", fmt_2(r.get("gross_prof")), "", MUTED),
         ]
-        rrows_html = "".join(
-            f'<tr><td style="color:{MUTED};padding:7px 14px;font-size:12.5px">{k}</td>'
-            f'<td style="font-family:monospace;font-size:12.5px;padding:7px 14px;'
-            f'text-align:right;font-weight:600">{v}</td></tr>'
-            for k, v in risk_rows
+        rrows_html = ""
+        for k, v, sub, vc in risk_rows:
+            rrows_html += (
+                f'<tr style="border-bottom:1px solid {BORDER}">'
+                f'<td style="color:{MUTED};padding:8px 14px;font-size:12px">{k}</td>'
+                f'<td style="padding:8px 14px;text-align:right">'
+                f'  <div style="font-family:monospace;font-weight:700;font-size:13px;color:{vc}">{v}</div>'
+                f'  {"<div style=font-size:10px;color:" + MUTED2 + ">" + sub + "</div>" if sub else ""}'
+                f'</td></tr>'
+            )
+        st.markdown(
+            f'<div style="border:1px solid {BORDER};border-radius:10px;overflow:hidden">'
+            f'<table style="width:100%;border-collapse:collapse"><tbody>{rrows_html}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_analyst:
+        st.markdown(
+            f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:12px">Analyst Targets</div>',
+            unsafe_allow_html=True,
+        )
+        analyst_html = _analyst_targets_html(info)
+        if analyst_html:
+            st.markdown(analyst_html, unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div style="color:{MUTED2};font-size:12px;padding:20px;text-align:center;'
+                f'border:1px solid {BORDER};border-radius:10px">No analyst coverage data</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:12px">Key Financials</div>',
+            unsafe_allow_html=True,
+        )
+        def _v(key, fmt=".2f", pct=False):
+            val2 = info.get(key)
+            if val2 is None: return "n/a"
+            try:
+                f2 = float(val2)
+                return f"{f2*100:.1f}%" if pct else format(f2, fmt)
+            except: return "n/a"
+        fin_rows = [
+            ("Revenue Growth",   _v("revenueGrowth",   pct=True)),
+            ("Gross Margin",     _v("grossMargins",     pct=True)),
+            ("Operating Margin", _v("operatingMargins", pct=True)),
+            ("Net Margin",       _v("profitMargins",    pct=True)),
+            ("ROE",              _v("returnOnEquity",   pct=True)),
+            ("ROA",              _v("returnOnAssets",   pct=True)),
+            ("Debt / Equity",    _v("debtToEquity",     ".2f")),
+            ("Current Ratio",    _v("currentRatio",     ".2f")),
+            ("Free Cash Flow",   f'${float(info["freeCashflow"])/1e6:,.0f}M' if info.get("freeCashflow") else "n/a"),
+            ("Dividend Yield",   _v("dividendYield",    pct=True)),
+            ("52W High",         f'${float(info["fiftyTwoWeekHigh"]):,.2f}' if info.get("fiftyTwoWeekHigh") else "n/a"),
+            ("52W Low",          f'${float(info["fiftyTwoWeekLow"]):,.2f}' if info.get("fiftyTwoWeekLow") else "n/a"),
+        ]
+        fr_html = "".join(
+            f'<tr style="border-bottom:1px solid {BORDER}">'
+            f'<td style="color:{MUTED};padding:7px 14px;font-size:12px">{k}</td>'
+            f'<td style="font-family:monospace;font-weight:600;padding:7px 14px;font-size:12px;text-align:right;color:{TEXT}">{v}</td>'
+            f'</tr>'
+            for k, v in fin_rows
         )
         st.markdown(
-            f'<table class="qt" style="width:100%"><tbody>{rrows_html}</tbody></table>',
+            f'<div style="border:1px solid {BORDER};border-radius:10px;overflow:hidden">'
+            f'<table style="width:100%;border-collapse:collapse"><tbody>{fr_html}</tbody></table></div>',
             unsafe_allow_html=True,
         )
 
-    # ── Protocol gates for this stock ─────────────────────────────────────────
-    proto_map = {p["ticker"]: p for p in protocol}
-    p = proto_map.get(ticker)
+    with col_tech:
+        st.markdown(
+            f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:12px">Technical Status</div>',
+            unsafe_allow_html=True,
+        )
+        tech_html = _technical_summary_html(info, hist)
+        if tech_html:
+            st.markdown(tech_html, unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div style="color:{MUTED2};font-size:12px;padding:20px;text-align:center;'
+                f'border:1px solid {BORDER};border-radius:10px">Technical data unavailable</div>',
+                unsafe_allow_html=True,
+            )
+
+    # ── NEWS ──────────────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:12px">'
+        f'Latest News <span style="font-size:11px;font-weight:400;color:{MUTED2}">· multi-source · sentiment scored</span>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    with st.spinner("Loading news…"):
+        articles = NewsFetcher().fetch_ticker_news(ticker, n=12)
+
+    if not articles:
+        st.markdown(
+            f'<div style="color:{MUTED2};font-size:12px;padding:16px;text-align:center;'
+            f'border:1px solid {BORDER};border-radius:10px">No recent news found</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        score    = NewsFetcher().score_sentiment([a["title"] for a in articles])
+        sc_color = GREEN if score >= 60 else RED if score < 40 else AMBER
+        sc_bg    = "#ECFDF5" if score >= 60 else "#FEF2F2" if score < 40 else "#FFFBEB"
+        sc_label = "Positive" if score >= 60 else "Negative" if score < 40 else "Neutral"
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
+            f'<span class="badge" style="color:{sc_color};background:{sc_bg};font-size:12px;padding:5px 12px">'
+            f'Sentiment {score:.0f}/100 — {sc_label}</span>'
+            f'<span style="font-size:11px;color:{MUTED2}">{len(articles)} articles</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        news_html = ""
+        for a in articles:
+            hint    = a.get("sentiment_hint", "neutral")
+            dot_col = GREEN if hint == "positive" else RED if hint == "negative" else MUTED2
+            title_html = (
+                f'<a href="{a["url"]}" target="_blank" style="color:{TEXT};text-decoration:none;'
+                f'font-weight:600">{a["title"]}</a>'
+                if a.get("url") else
+                f'<span style="font-weight:600">{a["title"]}</span>'
+            )
+            news_html += (
+                f'<div style="display:flex;gap:10px;padding:11px 0;border-bottom:1px solid {BORDER}">'
+                f'  <span style="color:{dot_col};font-size:8px;margin-top:5px;flex-shrink:0">●</span>'
+                f'  <div>'
+                f'    <div style="font-size:13px;line-height:1.5;color:{TEXT}">{title_html}</div>'
+                f'    <div style="font-size:11px;color:{MUTED2};margin-top:4px">'
+                f'      {a.get("source","—")}  ·  {a.get("published","—")}'
+                f'    </div>'
+                f'  </div>'
+                f'</div>'
+            )
+        st.markdown(
+            f'<div style="border:1px solid {BORDER};border-radius:10px;padding:0 16px">{news_html}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── PROTOCOL GATES ────────────────────────────────────────────────────────
+    p = proto_map_local.get(ticker)
     if p:
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown(shdr("Protocol Gates"), unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="font-size:13px;font-weight:700;color:{TEXT};margin-bottom:4px">Investment Protocol Gates</div>'
+            f'<div style="font-size:11px;color:{MUTED2};margin-bottom:14px">'
+            f'Score {p.get("overall_score",0):.1f}  ·  Conviction {p.get("conviction","—")}  ·  '
+            f'{p.get("pass_count",0)} pass / {p.get("warn_count",0)} warn / {p.get("fail_count",0)} fail'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
         gates    = p.get("gates", [])
         statuses = p.get("gate_statuses", [])
         gate_cols = st.columns(7)
-        for i, (col, gname, score, status) in enumerate(
+        for i, (col, gname, score2, status) in enumerate(
                 zip(gate_cols, GATE_NAMES, gates, statuses)):
             sc_col = GREEN if status == "pass" else AMBER if status == "warn" else RED
             bg_col = "#ECFDF5" if status == "pass" else "#FFFBEB" if status == "warn" else "#FEF2F2"
             with col:
                 st.markdown(
                     f'<div style="background:{bg_col};border:1px solid {BORDER};'
-                    f'border-top:3px solid {sc_col};border-radius:8px;'
-                    f'padding:12px 8px;text-align:center">'
+                    f'border-top:4px solid {sc_col};border-radius:10px;'
+                    f'padding:14px 8px;text-align:center">'
                     f'  <div style="font-size:9px;font-weight:700;text-transform:uppercase;'
-                    f'       letter-spacing:.08em;color:{MUTED2};margin-bottom:6px">'
-                    f'    {gname}</div>'
-                    f'  <div style="font-size:22px;font-weight:900;color:{sc_col}">'
-                    f'    {float(score):.0f}</div>'
-                    f'  <div style="font-size:9px;font-weight:700;text-transform:uppercase;'
-                    f'       color:{sc_col};margin-top:4px">{status.upper()}</div>'
+                    f'       letter-spacing:.08em;color:{MUTED2};margin-bottom:8px">{gname}</div>'
+                    f'  <div style="font-size:26px;font-weight:900;color:{sc_col};line-height:1">'
+                    f'    {float(score2):.0f}</div>'
+                    f'  <div style="font-size:9px;font-weight:800;text-transform:uppercase;'
+                    f'       color:{sc_col};margin-top:6px;letter-spacing:.06em">{status.upper()}</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -2359,6 +2515,324 @@ def tab_stock_lookup(universe_data, valuation, risk, protocol, rf_rate):
             f'Enter a ticker symbol above and click Look Up</div>',
             unsafe_allow_html=True,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 9 — BACKTEST
+# ─────────────────────────────────────────────────────────────────────────────
+def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: float, stop: float) -> list:
+    """
+    Simulate the valuation entry strategy on historical prices.
+    Entry : price <= entry_low (in the buy zone)
+    Exit  : price >= target (take profit) OR price <= stop (stop loss)
+    Returns list of trade dicts.
+    """
+    trades = []
+    in_trade = False
+    entry_price = None
+    entry_date  = None
+
+    prices = hist["Close"].dropna()
+    for date, price in prices.items():
+        price = float(price)
+        if not in_trade:
+            if price <= entry_low:
+                in_trade    = True
+                entry_price = price
+                entry_date  = date
+        else:
+            if price >= target:
+                ret = (price - entry_price) / entry_price * 100
+                trades.append({
+                    "entry_date": str(entry_date)[:10],
+                    "entry":      round(entry_price, 2),
+                    "exit_date":  str(date)[:10],
+                    "exit":       round(price, 2),
+                    "return_pct": round(ret, 2),
+                    "reason":     "Target hit",
+                    "won":        True,
+                })
+                in_trade = False
+            elif price <= stop:
+                ret = (price - entry_price) / entry_price * 100
+                trades.append({
+                    "entry_date": str(entry_date)[:10],
+                    "entry":      round(entry_price, 2),
+                    "exit_date":  str(date)[:10],
+                    "exit":       round(price, 2),
+                    "return_pct": round(ret, 2),
+                    "reason":     "Stop loss",
+                    "won":        False,
+                })
+                in_trade = False
+
+    # Open position — mark-to-market
+    if in_trade:
+        last_price = float(prices.iloc[-1])
+        last_date  = prices.index[-1]
+        ret = (last_price - entry_price) / entry_price * 100
+        trades.append({
+            "entry_date": str(entry_date)[:10],
+            "entry":      round(entry_price, 2),
+            "exit_date":  str(last_date)[:10],
+            "exit":       round(last_price, 2),
+            "return_pct": round(ret, 2),
+            "reason":     "Open position",
+            "won":        ret >= 0,
+        })
+
+    return trades
+
+
+def tab_backtest(universe_data: dict, valuation: dict, risk: dict, rf_rate: float):
+    st.markdown(
+        shdr("Backtest", "Simulate our valuation entry strategy on historical price data"),
+        unsafe_allow_html=True,
+    )
+
+    # ── Controls ─────────────────────────────────────────────────────────────
+    all_tickers = sorted(set(list(universe_data.keys()) + list(valuation.keys())))
+    col_t, col_p, col_run = st.columns([3, 1, 1])
+    with col_t:
+        bt_ticker = st.selectbox("Select ticker to backtest", all_tickers,
+                                 label_visibility="collapsed",
+                                 placeholder="Choose a ticker…")
+    with col_p:
+        bt_period = st.selectbox("Period", ["1y", "2y", "3y", "5y"], index=1,
+                                 label_visibility="collapsed")
+    with col_run:
+        go_btn = st.button("Run Backtest", type="primary", use_container_width=True)
+
+    if "bt_result" not in st.session_state:
+        st.session_state.bt_result  = None
+        st.session_state.bt_ticker  = None
+        st.session_state.bt_period  = None
+
+    if go_btn and bt_ticker:
+        st.session_state.bt_ticker = bt_ticker
+        st.session_state.bt_period = bt_period
+
+        # Get or fetch historical data
+        if bt_ticker in universe_data and universe_data[bt_ticker].get("history") is not None:
+            hist_raw = universe_data[bt_ticker]["history"]
+        else:
+            with st.spinner(f"Fetching {bt_ticker} price history…"):
+                import yfinance as yf
+                hist_raw = yf.download(bt_ticker, period=bt_period, progress=False, auto_adjust=True)
+
+        # Get valuation for entry/target/stop
+        val_r = valuation.get(bt_ticker, {})
+        if not val_r:
+            # Run valuation on the fly
+            with st.spinner("Running valuation…"):
+                d = universe_data.get(bt_ticker, {})
+                if d:
+                    df_tmp = pd.DataFrame([{"ticker": bt_ticker,
+                                            "sector": d.get("sector","Unknown"),
+                                            "composite_score": 0}])
+                    val_r = ValuationEngine(rf_rate).analyze_all(df_tmp, universe_data).get(bt_ticker, {})
+
+        entry_low = val_r.get("entry_low")
+        target    = val_r.get("target_price")
+        stop_loss = val_r.get("stop_loss")
+        fair_val  = val_r.get("fair_value")
+
+        if hist_raw is not None and not hist_raw.empty and entry_low and target and stop_loss:
+            trades = _run_backtest_simulation(hist_raw, entry_low, target, stop_loss)
+
+            # Fetch S&P500 for comparison
+            try:
+                import yfinance as yf
+                sp_hist = yf.download("^GSPC", period=bt_period, progress=False, auto_adjust=True)
+                sp500_ret = (float(sp_hist["Close"].iloc[-1]) / float(sp_hist["Close"].iloc[0]) - 1) * 100 if not sp_hist.empty else None
+            except Exception:
+                sp500_ret = None
+
+            bah_ret = (float(hist_raw["Close"].iloc[-1]) / float(hist_raw["Close"].iloc[0]) - 1) * 100
+
+            st.session_state.bt_result = {
+                "trades":      trades,
+                "hist":        hist_raw,
+                "val":         val_r,
+                "entry_low":   entry_low,
+                "target":      target,
+                "stop_loss":   stop_loss,
+                "fair_value":  fair_val,
+                "bah_ret":     bah_ret,
+                "sp500_ret":   sp500_ret,
+            }
+        else:
+            st.session_state.bt_result = {"error": "Insufficient valuation data or price history."}
+
+    # ── Results ───────────────────────────────────────────────────────────────
+    bt = st.session_state.bt_result
+    if not bt:
+        st.markdown(
+            f'<div style="text-align:center;padding:60px 20px;color:{MUTED2};font-size:14px">'
+            f'Select a ticker and click Run Backtest to simulate our valuation entry strategy.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    if bt.get("error"):
+        st.error(bt["error"])
+        return
+
+    trades    = bt["trades"]
+    hist      = bt["hist"]
+    entry_low = bt["entry_low"]
+    target    = bt["target"]
+    stop_loss = bt["stop_loss"]
+    fair_val  = bt["fair_value"]
+    bah_ret   = bt["bah_ret"]
+    sp500_ret = bt.get("sp500_ret")
+    t_name    = st.session_state.bt_ticker
+
+    # ── Strategy metrics ──────────────────────────────────────────────────────
+    n_trades  = len(trades)
+    n_wins    = sum(1 for t in trades if t["won"])
+    win_rate  = (n_wins / n_trades * 100) if n_trades > 0 else 0
+    open_pos  = next((t for t in trades if t["reason"] == "Open position"), None)
+    closed    = [t for t in trades if t["reason"] != "Open position"]
+
+    # Compound return across closed trades
+    compound = 1.0
+    for t in closed:
+        compound *= (1 + t["return_pct"] / 100)
+    total_return = (compound - 1) * 100 if closed else (open_pos["return_pct"] if open_pos else 0)
+
+    # ── Summary tiles ─────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    cols_m = st.columns(5)
+    def _bt_tile(label, value, sub, color):
+        return (
+            f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
+            f'border-top:3px solid {color};border-radius:10px;padding:14px 16px">'
+            f'<div style="font-size:10px;font-weight:700;text-transform:uppercase;'
+            f'letter-spacing:.09em;color:{MUTED2};margin-bottom:6px">{label}</div>'
+            f'<div style="font-size:22px;font-weight:800;color:{color};'
+            f'font-variant-numeric:tabular-nums">{value}</div>'
+            f'<div style="font-size:11px;color:{MUTED2};margin-top:4px">{sub}</div>'
+            f'</div>'
+        )
+
+    ret_color  = GREEN if total_return > 0 else RED
+    wr_color   = GREEN if win_rate >= 60 else RED if win_rate < 40 else AMBER
+    bah_color  = GREEN if bah_ret > 0 else RED
+    sp_color   = GREEN if (sp500_ret or 0) > 0 else RED
+    alpha_val  = total_return - (sp500_ret or 0)
+    alpha_clr  = GREEN if alpha_val > 0 else RED
+
+    with cols_m[0]: st.markdown(_bt_tile("Strategy Return", f"{total_return:+.1f}%", f"{len(closed)} closed trades", ret_color), unsafe_allow_html=True)
+    with cols_m[1]: st.markdown(_bt_tile("Win Rate", f"{win_rate:.0f}%", f"{n_wins}W / {n_trades-n_wins}L", wr_color), unsafe_allow_html=True)
+    with cols_m[2]: st.markdown(_bt_tile("Buy & Hold", f"{bah_ret:+.1f}%", "same period", bah_color), unsafe_allow_html=True)
+    with cols_m[3]: st.markdown(_bt_tile("S&P 500", f"{sp500_ret:+.1f}%" if sp500_ret is not None else "—", "same period", sp_color), unsafe_allow_html=True)
+    with cols_m[4]: st.markdown(_bt_tile("Alpha vs S&P", f"{alpha_val:+.1f}%" if sp500_ret is not None else "—", "strategy − benchmark", alpha_clr), unsafe_allow_html=True)
+
+    # ── Chart ─────────────────────────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(shdr("Price History with Entry / Exit Points"), unsafe_allow_html=True)
+
+    try:
+        hist_plot = hist.copy()
+        if hasattr(hist_plot.index, "tz") and hist_plot.index.tz is not None:
+            hist_plot.index = hist_plot.index.tz_localize(None)
+
+        closes = hist_plot["Close"].squeeze()
+
+        fig = go.Figure()
+        # Price line
+        fig.add_trace(go.Scatter(x=closes.index, y=closes.values,
+                                 name=t_name, line=dict(color=BLUE, width=2),
+                                 hovertemplate="%{x}<br>$%{y:,.2f}<extra></extra>"))
+
+        # Shaded zones
+        fig.add_hrect(y0=0, y1=entry_low, fillcolor=GREEN, opacity=0.05,
+                      layer="below", line_width=0, annotation_text="Buy zone",
+                      annotation_position="left")
+        if fair_val:
+            fig.add_hrect(y0=entry_low, y1=fair_val, fillcolor=AMBER, opacity=0.04,
+                          layer="below", line_width=0)
+        fig.add_hline(y=target,    line_color=GREEN, line_dash="dash", line_width=1.5,
+                      annotation_text=f"Target ${target:,.2f}", annotation_position="right")
+        fig.add_hline(y=entry_low, line_color=BLUE,  line_dash="dot",  line_width=1.5,
+                      annotation_text=f"Entry ${entry_low:,.2f}", annotation_position="right")
+        fig.add_hline(y=stop_loss, line_color=RED,   line_dash="dash", line_width=1.5,
+                      annotation_text=f"Stop ${stop_loss:,.2f}", annotation_position="right")
+        if fair_val:
+            fig.add_hline(y=fair_val, line_color=AMBER, line_dash="dot", line_width=1,
+                          annotation_text=f"Fair Value ${fair_val:,.2f}", annotation_position="right")
+
+        # Entry / exit markers
+        for tr in trades:
+            try:
+                fig.add_trace(go.Scatter(
+                    x=[tr["entry_date"]], y=[tr["entry"]],
+                    mode="markers", marker=dict(symbol="triangle-up", size=12, color=GREEN),
+                    name="Entry", showlegend=False,
+                    hovertemplate=f"BUY {tr['entry_date']}<br>${tr['entry']:,.2f}<extra></extra>",
+                ))
+                exit_color = GREEN if tr["won"] else RED
+                exit_sym   = "circle" if tr["reason"] != "Open position" else "circle-open"
+                fig.add_trace(go.Scatter(
+                    x=[tr["exit_date"]], y=[tr["exit"]],
+                    mode="markers", marker=dict(symbol=exit_sym, size=10, color=exit_color),
+                    name=tr["reason"], showlegend=False,
+                    hovertemplate=f"{tr['reason']} {tr['exit_date']}<br>${tr['exit']:,.2f} ({tr['return_pct']:+.1f}%)<extra></extra>",
+                ))
+            except Exception:
+                pass
+
+        fig.update_layout(
+            **_plotly_base(),
+            height=420,
+            showlegend=False,
+            margin=dict(l=40, r=120, t=30, b=40),
+            xaxis=dict(showgrid=False, zeroline=False),
+            yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False, tickprefix="$"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Chart error: {e}")
+
+    # ── Trade log ─────────────────────────────────────────────────────────────
+    if trades:
+        st.markdown(shdr("Trade Log"), unsafe_allow_html=True)
+        trade_rows = ""
+        for tr in trades:
+            ret_c  = GREEN if tr["won"] else RED
+            rsnbg  = "#ECFDF5" if tr["reason"] == "Target hit" else "#FEF2F2" if tr["reason"] == "Stop loss" else AMBER_LT
+            rsnc   = GREEN if tr["reason"] == "Target hit" else RED if tr["reason"] == "Stop loss" else AMBER
+            trade_rows += (
+                f'<tr>'
+                f'<td style="padding:8px 14px;font-size:12.5px">{tr["entry_date"]}</td>'
+                f'<td style="font-family:monospace;padding:8px 14px">${tr["entry"]:,.2f}</td>'
+                f'<td style="padding:8px 14px;font-size:12.5px">{tr["exit_date"]}</td>'
+                f'<td style="font-family:monospace;padding:8px 14px">${tr["exit"]:,.2f}</td>'
+                f'<td style="font-family:monospace;font-weight:700;color:{ret_c};padding:8px 14px">{tr["return_pct"]:+.2f}%</td>'
+                f'<td style="padding:8px 14px"><span class="badge" style="color:{rsnc};background:{rsnbg}">{tr["reason"]}</span></td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table class="qt"><thead><tr>'
+            f'<th>Entry Date</th><th>Entry $</th><th>Exit Date</th><th>Exit $</th>'
+            f'<th>Return</th><th>Reason</th>'
+            f'</tr></thead><tbody>{trade_rows}</tbody></table>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Strategy info ─────────────────────────────────────────────────────────
+    st.markdown(
+        f'<div style="margin-top:20px;padding:14px 18px;background:{GRAY_LT};'
+        f'border-radius:8px;border:1px solid {BORDER};font-size:12px;color:{MUTED}">'
+        f'<b>Strategy rules:</b> Enter when price ≤ entry zone (${entry_low:,.2f} — '
+        f'fair value × 0.80 with 20% margin of safety). '
+        f'Take profit at target (${target:,.2f} — fair value × 1.20). '
+        f'Cut loss at stop (${stop_loss:,.2f} — entry × 0.92). '
+        f'Based on current fundamental valuation — historical fundamentals vary.'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2554,16 +3028,21 @@ def tab_history():
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
-    profile, run_btn, hist_btn = render_sidebar()
+    profile, run_btn, hist_btn, bt_btn = render_sidebar()
 
     if "results" not in st.session_state:
         st.session_state.results           = None
         st.session_state.profile           = None
         st.session_state.show_history      = False
+        st.session_state.show_backtest     = False
         st.session_state.rankings_selected = None
+        st.session_state.bt_result         = None
+        st.session_state.bt_ticker         = None
+        st.session_state.bt_period         = None
 
     if run_btn:
-        st.session_state.show_history = False
+        st.session_state.show_history  = False
+        st.session_state.show_backtest = False
         with st.spinner("Running analysis…"):
             st.session_state.results = run_analysis(profile)
             st.session_state.profile = profile
@@ -2573,14 +3052,33 @@ def main():
         st.session_state.show_history = not st.session_state.get("show_history", False)
         st.rerun()
 
-    # ── Past Sessions view (works before and after analysis) ───────────────
+    if bt_btn:
+        st.session_state.show_backtest = not st.session_state.get("show_backtest", False)
+        st.session_state.show_history  = False
+        st.rerun()
+
+    # ── Past Sessions view ─────────────────────────────────────────────────
     if st.session_state.get("show_history", False):
         st.markdown(
             f'<div class="ptitle">Stock Ranking Advisor</div>'
-            f'<div class="psub">Past Sessions  ·  Click "Past Sessions" in the sidebar to close</div>',
+            f'<div class="psub">Past Sessions  ·  Click "Past Sessions" in the sidebar to toggle</div>',
             unsafe_allow_html=True,
         )
         tab_history()
+        return
+
+    # ── Backtest view (works before and after analysis) ────────────────────
+    if st.session_state.get("show_backtest", False):
+        st.markdown(
+            f'<div class="ptitle">Stock Ranking Advisor</div>'
+            f'<div class="psub">Backtest  ·  Simulate valuation entry strategy  ·  Click "Backtest" to close</div>',
+            unsafe_allow_html=True,
+        )
+        uni_bt  = (st.session_state.results or {}).get("universe_data", {})
+        val_bt  = (st.session_state.results or {}).get("valuation", {})
+        risk_bt = (st.session_state.results or {}).get("risk", {})
+        rf_bt   = (st.session_state.results or {}).get("rf_rate", 0.045)
+        tab_backtest(uni_bt, val_bt, risk_bt, rf_bt)
         return
 
     if st.session_state.results is None:
@@ -2609,7 +3107,7 @@ def main():
 
     render_macro_strip(macro, top10, rf)
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
         "Rankings",
         "Valuation",
         "Risk & Quality",
@@ -2618,6 +3116,7 @@ def main():
         "Macro & Performance",
         "Stock Lookup",
         "History",
+        "Backtest",
     ])
 
     with tab1: tab_rankings(top10, profile, val, proto, risk)
@@ -2628,6 +3127,7 @@ def main():
     with tab6: tab_macro(top10, macro, uni, sp500, profile)
     with tab7: tab_stock_lookup(uni, val, risk, proto, rf)
     with tab8: tab_history()
+    with tab9: tab_backtest(uni, val, risk, rf)
 
 
 if __name__ == "__main__":

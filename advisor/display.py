@@ -161,9 +161,16 @@ class TerminalDisplay:
             sig       = val.get("signal", "INSUFFICIENT_DATA")
             n_methods = val.get("methods_count", 0)
 
+            _EST_LABELS = {
+                "dcf":       "DCF (2-stage)",
+                "graham":    "Graham Number",
+                "ev_ebitda": "EV/EBITDA",
+                "fcf_yield": "FCF Yield @4.5%",
+            }
             if estimates:
                 _p(f"  ┌── VALUATION  ({n_methods} independent method{'s' if n_methods != 1 else ''})")
-                for method, est in estimates.items():
+                for key, est in estimates.items():
+                    method   = _EST_LABELS.get(key, key)
                     diff_pct = (cur - est) / est * 100
                     arrow    = "premium" if diff_pct > 0 else "discount"
                     _p(f"  │  {method:<22}  ${est:>8,.2f}  │  current {diff_pct:+.1f}% {arrow}")

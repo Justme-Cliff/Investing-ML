@@ -77,19 +77,19 @@ class ValuationEngine:
 
         dcf = self._dcf(info)
         if dcf and dcf > 0:
-            estimates["DCF (2-stage)"] = dcf
+            estimates["dcf"] = dcf
 
         gn = self._graham_number(info)
         if gn and gn > 0:
-            estimates["Graham Number"] = gn
+            estimates["graham"] = gn
 
         ev = self._ev_ebitda_target(info, sector)
         if ev and ev > 0:
-            estimates["EV/EBITDA"] = ev
+            estimates["ev_ebitda"] = ev
 
         fcf = self._fcf_yield_target(info)
         if fcf and fcf > 0:
-            estimates["FCF Yield @4.5%"] = fcf
+            estimates["fcf_yield"] = fcf
 
         if not estimates:
             return {
