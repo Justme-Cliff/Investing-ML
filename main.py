@@ -86,6 +86,18 @@ def main():
 
     print(f"  Done — {len(ranked_df)} stocks scored.\n")
 
+    # ── 5b. Apply fresh-picks penalty (optional) ──────────────────────────────
+    if profile.avoid_recent:
+        recent_tickers = memory.get_recent_tickers(n_sessions=2)
+        if recent_tickers:
+            PENALTY = 22.0   # points knocked off composite_score for repeat picks
+            mask = ranked_df["ticker"].isin(recent_tickers)
+            ranked_df.loc[mask, "composite_score"] = (
+                ranked_df.loc[mask, "composite_score"] - PENALTY
+            ).clip(lower=0)
+            ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
+            print(f"  Fresh picks mode: -{PENALTY:.0f}pt penalty applied to {mask.sum()} recent picks ({', '.join(recent_tickers)}).\n")
+
     # ── 6. Correlation-aware selection + Kelly position sizing ────────────────
     constructor = PortfolioConstructor()
     top10       = constructor.select(ranked_df, universe_data)
@@ -114,7 +126,7 @@ def main():
     display.show_protocol(protocol_results)
 
     # ── 11. Deep quantitative analysis (hedge-fund grade output) ─────────────
-    display.show_deep_analysis(top10_sized, valuation_results, risk_results)
+    display.show_deep_analysis(top10_sized, valuation_results, risk_results, universe_data)
 
     # ── 12. Charts ────────────────────────────────────────────────────────────
     print("Generating charts...")
@@ -147,7 +159,8 @@ def main():
 
     import matplotlib.pyplot as plt
     try:
-        plt.show()
+        plt.show(block=False)
+        plt.pause(0.1)
     except Exception:
         print("  (Open the chart PNG files to view visualisations.)\n")
 

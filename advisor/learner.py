@@ -145,6 +145,24 @@ class SessionMemory:
             pass
         return None
 
+    # ── Recent picks (for avoid-repeat logic) ────────────────────────────────
+    def get_recent_tickers(self, n_sessions: int = 2) -> List[str]:
+        """
+        Return tickers recommended in the last n_sessions sessions.
+        Used to penalise repeat picks so each run feels fresh.
+        """
+        sessions = self._data.get("sessions", [])
+        if not sessions:
+            return []
+        recent = sorted(sessions, key=lambda s: s.get("timestamp", ""), reverse=True)
+        tickers = []
+        for s in recent[:n_sessions]:
+            for p in s.get("picks", []):
+                t = p.get("ticker")
+                if t and t not in tickers:
+                    tickers.append(t)
+        return tickers
+
     # ── Track record summary ──────────────────────────────────────────────────
     def get_track_record(self) -> List[dict]:
         """Return evaluated sessions sorted by date desc."""

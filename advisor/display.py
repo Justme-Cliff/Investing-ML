@@ -111,7 +111,8 @@ class TerminalDisplay:
     # ── Deep quantitative analysis ────────────────────────────────────────────
     def show_deep_analysis(self, top10: pd.DataFrame,
                            valuation_results: dict,
-                           risk_results: dict):
+                           risk_results: dict,
+                           universe_data: dict = None):
         W = 100
         _p("\n" + "█" * W)
         _p("  DEEP QUANTITATIVE ANALYSIS  (Hedge-Fund Grade Math)")
@@ -125,12 +126,25 @@ class TerminalDisplay:
 
             val  = valuation_results.get(t, {})
             risk = risk_results.get(t, {})
+            udata = (universe_data or {}).get(t, {})
 
             _p(f"\n  {'─'*98}")
             label = f"#{int(row['rank'])}  {t}"
             if name:
                 label += f"  —  {name[:45]}"
             label += f"  |  {sector}  |  Composite: {score:.1f}/100"
+
+            # Earnings warning
+            days_away = udata.get("earnings_days_away")
+            edate     = udata.get("earnings_date", "")
+            if days_away is not None:
+                if   days_away <= 7:  warn = f"  ⚠  EARNINGS IN {days_away} DAYS ({edate})  ⚠"
+                elif days_away <= 14: warn = f"  !  Earnings in {days_away} days ({edate})"
+                elif days_away <= 30: warn = f"  Earnings in {days_away} days ({edate})"
+                else:                 warn = ""
+                if warn:
+                    label += warn
+
             _p(f"  {label}")
             _p(f"  {'─'*98}")
 
@@ -167,6 +181,18 @@ class TerminalDisplay:
                    f"{'above' if (prem or 0) > 0 else 'below'} fair value)")
             else:
                 _p(f"  VALUATION: Insufficient data (no EPS/FCF/EBITDA available)")
+
+            # ── DCF Sensitivity ───────────────────────────────────────────────
+            sens = val.get("sensitivity", {})
+            if sens:
+                _p(f"  ┌── DCF SENSITIVITY  (Bear / Base / Bull growth scenarios)")
+                for sname, sv in sens.items():
+                    fv_s  = f"${sv['fair_value']:,.2f}" if sv.get("fair_value") else "N/A"
+                    gr_s  = f"{sv['growth_rate']:+.1f}% growth"
+                    sig_s = sv.get("signal", "—")
+                    prem_s = f"{sv['premium_pct']:+.1f}% vs FV" if sv.get("premium_pct") is not None else ""
+                    _p(f"  │  {sname:<5}  FV {fv_s:<12}  {gr_s:<18}  {sig_s:<14}  {prem_s}")
+                _p(f"  └──")
 
             # ── ROIC / WACC / Quality ─────────────────────────────────────────
             rw     = risk.get("roic_wacc", {})

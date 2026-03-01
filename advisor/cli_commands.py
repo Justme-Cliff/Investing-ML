@@ -61,6 +61,7 @@ _HELP_TEXT = """
   [green]/remove AAPL[/green]          Remove ticker from watchlist
   [green]/watchlist[/green]            Show watchlist with live prices
   [green]/macro[/green]                Macro environment snapshot
+  [green]/history [n][/green]          Past session results (default n=10)
   [green]/exit[/green]                 Leave interactive mode
 
 [dim]Tip: any ticker works, even ones outside the universe.[/dim]
@@ -131,6 +132,8 @@ class CommandHandler:
                 self._cmd_watchlist()
             elif cmd == "/macro":
                 self._cmd_macro()
+            elif cmd == "/history":
+                self._cmd_history(args)
             else:
                 _CONSOLE.print(
                     f"[red]Unknown command:[/red] {cmd}  "
@@ -158,13 +161,16 @@ class CommandHandler:
             data = fresh[ticker]
 
         info = data.get("info", {})
-        self._print_stock_header(ticker, info, data.get("sector", "—"))
+        self._print_stock_header(ticker, info, data.get("sector", "—"), data)
+        self._print_quant_thesis(ticker)
         self._print_valuation_block(ticker, info)
         self._print_risk_block(ticker, data)
         self._print_protocol_block(ticker)
         self._print_key_financials(info)
+        self._print_analyst_targets(info)
+        self._print_technical_summary(info, data.get("history"))
 
-    def _print_stock_header(self, ticker: str, info: dict, sector: str):
+    def _print_stock_header(self, ticker: str, info: dict, sector: str, data: dict = None):
         name  = info.get("longName", ticker)
         price = info.get("currentPrice") or info.get("regularMarketPrice")
         mktcap = info.get("marketCap", 0)
@@ -173,17 +179,220 @@ class CommandHandler:
                       else "—")
         desc = (info.get("longBusinessSummary") or "")[:220]
 
+        # Earnings warning
+        days_away = (data or {}).get("earnings_days_away")
+        edate     = (data or {}).get("earnings_date", "")
+        earn_line = ""
+        if days_away is not None and days_away <= 30:
+            if   days_away <= 7:  earn_line = f"\n[bold red]⚠  EARNINGS IN {days_away} DAYS ({edate}) — high event risk[/bold red]"
+            elif days_away <= 14: earn_line = f"\n[yellow]!  Earnings in {days_away} days ({edate})[/yellow]"
+            else:                  earn_line = f"\n[dim]Earnings in {days_away} days ({edate})[/dim]"
+
         _CONSOLE.print(
             Panel(
                 f"[bold white]{name}[/bold white]  [dim]({ticker})[/dim]\n"
                 f"[dim]{sector}[/dim]  ·  "
                 f"Price: [bold cyan]${price:,.2f}[/bold cyan]  ·  "
-                f"Market Cap: [cyan]{mktcap_str}[/cyan]\n\n"
+                f"Market Cap: [cyan]{mktcap_str}[/cyan]"
+                f"{earn_line}\n\n"
                 f"[dim]{desc}{'…' if len(desc)==220 else ''}[/dim]",
                 title=f"[bold]{ticker}[/bold]",
                 border_style="cyan",
             )
         )
+
+    def _print_quant_thesis(self, ticker: str):
+        """Auto-generate a Citadel-style quant thesis using cached val/risk/proto."""
+        val = self._val.get(ticker, {})
+        r   = self._risk.get(ticker, {})
+        p   = self._proto.get(ticker, {})
+
+        parts = []
+
+        # Valuation
+        sig   = val.get("signal", "")
+        fv    = val.get("fair_value")
+        price = val.get("current_price")
+        prem  = val.get("premium_pct")
+        rr    = val.get("rr_ratio")
+        methods = val.get("methods_count", 0)
+        upside  = val.get("upside_pct")
+        tgt     = val.get("target_price")
+
+        if fv and price:
+            direction = "below" if (prem or 0) < 0 else "above"
+            abs_pct   = abs(prem or 0)
+            sig_map = {
+                "STRONG_BUY": "firmly in the STRONG BUY zone",
+                "BUY":        "in the BUY zone",
+                "HOLD_WATCH": "at HOLD/WATCH",
+                "WAIT":       "above FV — WAIT for pullback",
+                "AVOID_PEAK": "at AVOID PEAK — not a clean entry",
+            }
+            sig_text = sig_map.get(sig, "")
+            rr_text  = f"  R/R {rr:.1f}:1." if rr else ""
+            up_text  = f"  Target ${tgt:,.2f} → {upside:+.1f}% upside." if (tgt and upside) else ""
+            parts.append(
+                f"[bold white]{ticker}[/bold white] at [cyan]${price:,.2f}[/cyan] — "
+                f"[bold]{abs_pct:.1f}%[/bold] {direction} {methods}-method FV "
+                f"[green]${fv:,.2f}[/green], {sig_text}.{rr_text}{up_text}"
+            )
+
+        # ROIC/WACC
+        rw = r.get("roic_wacc", {})
+        if rw.get("spread") is not None:
+            spread  = rw["spread"]
+            verdict = rw.get("verdict", "—")
+            c       = "green" if spread > 8 else "red" if spread < 0 else "yellow"
+            parts.append(
+                f"ROIC/WACC [bold {c}]{spread:+.1f}%[/bold {c}] — {verdict}."
+            )
+
+        # Piotroski
+        pf = r.get("piotroski", {})
+        if pf.get("score") is not None:
+            sc  = pf["score"]
+            it  = pf.get("interpretation", "")
+            pc  = "green" if sc >= 7 else "red" if sc <= 3 else "yellow"
+            parts.append(f"Piotroski [{pc}]{sc}/9[/{pc}] — {it}.")
+
+        # Altman Z
+        az = r.get("altman_z", {})
+        if az.get("score") is not None:
+            azs = az["score"]
+            azz = az.get("zone", "—")
+            azc = "green" if azz == "SAFE" else "red" if azz == "DISTRESS" else "yellow"
+            parts.append(f"Altman Z [cyan]{azs:.2f}[/cyan] [{azc}]{azz}[/{azc}].")
+
+        # Sharpe
+        sharpe = r.get("sharpe")
+        if sharpe is not None:
+            sc = "green" if sharpe > 1.2 else "red" if sharpe < 0.5 else "yellow"
+            parts.append(f"Sharpe [{sc}]{sharpe:.2f}[/{sc}].")
+
+        # Protocol
+        if p:
+            pconv = p.get("conviction", "—")
+            passc = p.get("pass_count", 0)
+            warnc = p.get("warn_count", 0)
+            failc = p.get("fail_count", 0)
+            overall = p.get("overall_score", 0)
+            cc = "green" if pconv == "HIGH" else "red" if pconv == "LOW" else "yellow"
+            parts.append(
+                f"Protocol: [{cc}]{passc}P/{warnc}W/{failc}F[/{cc}] "
+                f"score {overall:.0f} · [{cc}]{pconv}[/{cc}] conviction."
+            )
+
+        if not parts:
+            return
+
+        body = "  " + "\n  ".join(parts)
+        _CONSOLE.print(
+            Panel(
+                body,
+                title="[bold yellow]Quant Thesis[/bold yellow]",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+        )
+
+    def _print_analyst_targets(self, info: dict):
+        """Print analyst price target distribution."""
+        mean_t = info.get("targetMeanPrice")
+        high_t = info.get("targetHighPrice")
+        low_t  = info.get("targetLowPrice")
+        n_ana  = info.get("numberOfAnalystOpinions")
+        rec_key = info.get("recommendationKey", "")
+
+        if not mean_t:
+            return
+
+        cur    = info.get("currentPrice") or info.get("regularMarketPrice") or 0
+        upside = ((float(mean_t) / float(cur)) - 1) * 100 if cur and mean_t else None
+
+        rec_lbl = rec_key.upper().replace("_", " ") if rec_key else "—"
+        rec_map  = {"STRONG BUY": "green", "BUY": "cyan", "HOLD": "yellow",
+                    "UNDERPERFORM": "orange1", "SELL": "red"}
+        rec_color = rec_map.get(rec_lbl, "white")
+
+        t = Table(title="Analyst Targets", box=box.SIMPLE, show_header=False)
+        t.add_column("Label", style="dim", min_width=18)
+        t.add_column("Value", justify="right")
+        t.add_row("Consensus",   f"[{rec_color}]{rec_lbl}[/{rec_color}]")
+        t.add_row("# Analysts",  str(int(n_ana)) if n_ana else "—")
+        t.add_row("Mean Target", f"[cyan]{_price(mean_t)}[/cyan]" + (
+            f"  [green]+{upside:.1f}%[/green]" if (upside or 0) > 0 else
+            f"  [red]{upside:.1f}%[/red]" if upside else ""
+        ))
+        t.add_row("High Target", _price(high_t))
+        t.add_row("Low Target",  _price(low_t))
+        _CONSOLE.print(t)
+
+    def _print_technical_summary(self, info: dict, hist=None):
+        """Print plain-English technical status: SMA, 52W position, momentum."""
+        import numpy as np
+
+        sma50  = info.get("fiftyDayAverage")
+        sma200 = info.get("twoHundredDayAverage")
+        price  = info.get("currentPrice") or info.get("regularMarketPrice")
+        low52  = info.get("fiftyTwoWeekLow")
+        high52 = info.get("fiftyTwoWeekHigh")
+
+        rows = []
+
+        if price and sma200:
+            price, sma200 = float(price), float(sma200)
+            trend = "above" if price > sma200 else "below"
+            col   = "green" if price > sma200 else "red"
+            vs200 = ((price / sma200) - 1) * 100
+            rows.append(("SMA 200", f"[{col}]{trend}[/{col}] ({vs200:+.1f}%)"))
+        if price and sma50:
+            price, sma50 = float(price), float(sma50)
+            trend = "above" if price > sma50 else "below"
+            col   = "green" if price > sma50 else "red"
+            vs50  = ((price / sma50) - 1) * 100
+            rows.append(("SMA 50",  f"[{col}]{trend}[/{col}] ({vs50:+.1f}%)"))
+
+        if price and low52 and high52:
+            rng = float(high52) - float(low52)
+            if rng > 0:
+                pos = (float(price) - float(low52)) / rng * 100
+                pc  = "red" if pos > 85 else "green" if pos < 30 else "yellow"
+                rows.append(("52W Range", f"[{pc}]{pos:.0f}%[/{pc}] of range  "
+                             f"[dim]${float(low52):,.2f}–${float(high52):,.2f}[/dim]"))
+
+        if hist is not None and hasattr(hist, '__len__') and len(hist) >= 15:
+            try:
+                closes = hist["Close"].dropna().values.astype(float)
+                deltas = np.diff(closes[-15:])
+                gains  = deltas[deltas > 0].mean() if (deltas > 0).any() else 0
+                losses = (-deltas[deltas < 0]).mean() if (deltas < 0).any() else 0.001
+                rs     = gains / losses
+                rsi    = 100 - (100 / (1 + rs))
+                rsi_lbl = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
+                rsi_col = "red" if rsi > 70 else "green" if rsi < 30 else "yellow"
+                rows.append(("RSI (14)", f"[{rsi_col}]{rsi:.1f} — {rsi_lbl}[/{rsi_col}]"))
+            except Exception:
+                pass
+
+        if hist is not None and hasattr(hist, '__len__') and len(hist) >= 63:
+            try:
+                closes  = hist["Close"].dropna().values.astype(float)
+                mom_3m  = (closes[-1] / closes[-63] - 1) * 100
+                mc      = "green" if mom_3m > 5 else "red" if mom_3m < -5 else "yellow"
+                rows.append(("3M Momentum", f"[{mc}]{mom_3m:+.1f}%[/{mc}]"))
+            except Exception:
+                pass
+
+        if not rows:
+            return
+
+        t = Table(title="Technical Status", box=box.SIMPLE, show_header=False)
+        t.add_column("Indicator", style="dim", min_width=18)
+        t.add_column("Status", justify="right")
+        for k, v in rows:
+            t.add_row(k, v)
+        _CONSOLE.print(t)
 
     def _print_valuation_block(self, ticker: str, info: dict):
         val = self._val.get(ticker)
@@ -238,6 +447,31 @@ class CommandHandler:
             f"Signal  [bold]{sig}[/bold]"
             if fv and el and rr else ""
         )
+
+        # DCF sensitivity
+        sens = val.get("sensitivity", {})
+        if sens:
+            t_sens = Table(title="DCF Sensitivity", box=box.SIMPLE, show_header=True,
+                           header_style="bold dim")
+            t_sens.add_column("Scenario", style="dim",  min_width=6)
+            t_sens.add_column("Growth",   style="dim",  justify="right")
+            t_sens.add_column("Fair Value", style="cyan", justify="right")
+            t_sens.add_column("Premium",  justify="right")
+            t_sens.add_column("Signal",   style="bold")
+            for sname, sv in sens.items():
+                sfv   = sv.get("fair_value")
+                sgr   = sv.get("growth_rate")
+                sprem = sv.get("premium_pct")
+                ssig  = sv.get("signal", "—")
+                pstyle = "red" if (sprem or 0) > 5 else "green" if (sprem or 0) < -10 else "yellow"
+                t_sens.add_row(
+                    sname,
+                    f"{sgr:+.1f}%" if sgr is not None else "—",
+                    f"${sfv:,.2f}" if sfv else "N/A",
+                    f"[{pstyle}]{sprem:+.1f}%[/{pstyle}]" if sprem is not None else "—",
+                    ssig,
+                )
+            _CONSOLE.print(t_sens)
 
     def _print_risk_block(self, ticker: str, data: dict):
         r = self._risk.get(ticker)
@@ -552,6 +786,134 @@ class CommandHandler:
                   title="[bold]Macro Environment[/bold]",
                   border_style="dim")
         )
+
+    # ── /history ──────────────────────────────────────────────────────────────
+
+    def _cmd_history(self, args: List[str]):
+        from datetime import datetime, timezone
+
+        _history_path = os.path.join(
+            os.path.dirname(__file__), "..", "memory", "history.json"
+        )
+        try:
+            with open(_history_path) as f:
+                data = json.load(f)
+            sessions = data.get("sessions", [])
+        except FileNotFoundError:
+            _CONSOLE.print("[dim]No history yet. Run the analysis to start building session history.[/dim]")
+            return
+        except Exception as e:
+            _CONSOLE.print(f"[red]Could not load history: {e}[/red]")
+            return
+
+        if not sessions:
+            _CONSOLE.print("[dim]No past sessions found.[/dim]")
+            return
+
+        sessions = sorted(sessions, key=lambda s: s.get("timestamp", ""), reverse=True)
+        n_show   = int(args[0]) if args and args[0].isdigit() else 10
+
+        evald   = [s for s in sessions if s.get("evaluated")]
+        pending = [s for s in sessions if not s.get("evaluated")]
+
+        # Compute summary stats
+        alphas   = [s["evaluation"]["alpha"] for s in evald
+                    if (s.get("evaluation") or {}).get("alpha") is not None]
+        avg_alpha  = sum(alphas) / len(alphas) if alphas else None
+        beats_sp   = sum(1 for a in alphas if a > 0)
+        win_rate   = beats_sp / len(alphas) * 100 if alphas else None
+
+        alpha_str = ""
+        if avg_alpha is not None:
+            ac = "green" if avg_alpha >= 0 else "red"
+            alpha_str = (
+                f"  ·  Avg Alpha [{ac}]{avg_alpha*100:+.1f}%[/{ac}]"
+                f"  ·  Win Rate [cyan]{win_rate:.0f}%[/cyan]"
+            )
+
+        _CONSOLE.print(
+            Panel(
+                f"Total Sessions: [bold]{len(sessions)}[/bold]"
+                f"  ·  Evaluated: [cyan]{len(evald)}[/cyan]"
+                f"  ·  Pending: [dim]{len(pending)}[/dim]"
+                + alpha_str,
+                title="[bold]Session History[/bold]",
+                border_style="cyan",
+            )
+        )
+
+        now = datetime.now(timezone.utc)
+
+        for session in sessions[:n_show]:
+            ts      = session.get("timestamp", "")[:10]
+            sid     = session.get("session_id", "?")
+            prof    = session.get("profile", {})
+            risk    = prof.get("risk_level", "?")
+            horizon = prof.get("time_horizon", "?")
+            goal    = prof.get("goal", "?")
+            picks   = session.get("picks", [])
+
+            ticker_parts = [
+                f"[cyan]{p['ticker']}[/cyan] @ ${p.get('price_entry', 0):.0f}"
+                for p in picks
+            ]
+            tickers_str = "  ".join(ticker_parts)
+
+            if session.get("evaluated"):
+                ev      = session["evaluation"]
+                avg_ret = ev.get("avg_pick_return", 0) or 0
+                sp_ret  = ev.get("sp500_return")
+                alpha   = ev.get("alpha", 0) or 0
+                eval_dt = ev.get("evaluation_date", "")[:10]
+
+                ret_c   = "green" if avg_ret >= 0 else "red"
+                alpha_c = "green" if alpha   >= 0 else "red"
+                sp_str  = f"{sp_ret*100:+.1f}%" if sp_ret is not None else "—"
+
+                # Per-pick return lines
+                pick_lines = []
+                for ep in ev.get("picks", []):
+                    r  = ep.get("return", 0) or 0
+                    rc = "green" if r >= 0 else "red"
+                    pick_lines.append(
+                        f"  [bold]{ep['ticker']:<6}[/bold] [{rc}]{r*100:+.1f}%[/{rc}]"
+                        f"  [dim]exit ${ep.get('price_exit', 0):.2f}[/dim]"
+                    )
+
+                body = (
+                    f"[dim]{ts}  ·  #{sid}  ·  Risk {risk}  ·  {horizon}  ·  {goal}[/dim]\n"
+                    f"{tickers_str}\n\n"
+                    f"Avg Return [{ret_c}]{avg_ret*100:+.1f}%[/{ret_c}]"
+                    f"  ·  S&P {sp_str}"
+                    f"  ·  Alpha [{alpha_c}]{alpha*100:+.1f}%[/{alpha_c}]"
+                    f"  [dim](evaluated {eval_dt})[/dim]\n"
+                    + "\n".join(pick_lines)
+                )
+                border = "green" if alpha >= 0 else "red"
+
+            else:
+                try:
+                    ts_dt    = datetime.fromisoformat(session["timestamp"])
+                    days_old = (now - ts_dt).days
+                    days_left = max(0, 30 - days_old)
+                except Exception:
+                    days_old  = 0
+                    days_left = 30
+                body = (
+                    f"[dim]{ts}  ·  #{sid}  ·  Risk {risk}  ·  {horizon}  ·  {goal}[/dim]\n"
+                    f"{tickers_str}\n\n"
+                    f"[dim]Pending evaluation — {days_old} days old, "
+                    f"evaluates in ~{days_left} more days[/dim]"
+                )
+                border = "dim"
+
+            _CONSOLE.print(Panel(body, border_style=border))
+
+        if len(sessions) > n_show:
+            _CONSOLE.print(
+                f"[dim]Showing {n_show} of {len(sessions)} sessions. "
+                f"Use /history {len(sessions)} to see all.[/dim]"
+            )
 
     # ── Watchlist persistence ──────────────────────────────────────────────────
 

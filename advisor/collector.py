@@ -22,6 +22,7 @@ class UserProfile:
     preferred_sectors: List[str] = field(default_factory=list)
     excluded_sectors: List[str] = field(default_factory=list)
     existing_tickers: List[str] = field(default_factory=list)
+    avoid_recent: bool = False   # penalise tickers from last 2 sessions
 
     @property
     def income_focused(self) -> bool:
@@ -52,6 +53,7 @@ class InputCollector:
             drawdown                      = self._ask_drawdown()
             pref_sectors, excl_sectors    = self._ask_sectors()
             existing                      = self._ask_existing()
+            avoid_recent                  = self._ask_avoid_recent()
 
             profile = UserProfile(
                 portfolio_size      = size,
@@ -66,6 +68,7 @@ class InputCollector:
                 preferred_sectors   = pref_sectors,
                 excluded_sectors    = excl_sectors,
                 existing_tickers    = existing,
+                avoid_recent        = avoid_recent,
             )
             if self._confirm(profile):
                 return profile
@@ -245,6 +248,17 @@ class InputCollector:
         print(f"  Got it — {len(tickers)} existing ticker(s) noted.\n")
         return tickers
 
+    # ── Q8: Avoid recent picks ────────────────────────────────────────────────
+    def _ask_avoid_recent(self) -> bool:
+        _sep("QUESTION 8 of 8 — Fresh Picks Mode (optional)")
+        print("  Want to explore FRESH picks this run?")
+        print("  If yes, stocks from your last 2 sessions get a score penalty")
+        print("  so the tool recommends new ideas instead of repeating the same list.")
+        print("  Press Enter (or 'n') to keep the usual top-scoring picks.\n")
+        raw = input("  Fresh picks? (y / n) [default: n]: ").strip().lower()
+        print()
+        return raw in ("y", "yes")
+
     # ── Confirmation ──────────────────────────────────────────────────────────
     def _confirm(self, p: UserProfile) -> bool:
         print("\n" + "═" * 62)
@@ -261,6 +275,7 @@ class InputCollector:
             print(f"  Exclude Sectors:  {', '.join(p.excluded_sectors)}")
         if p.existing_tickers:
             print(f"  Already Own    :  {', '.join(p.existing_tickers)}")
+        print(f"  Fresh Picks    :  {'Yes — penalise recent picks' if p.avoid_recent else 'No — standard ranking'}")
         print("═" * 62)
         while True:
             ans = input("  Proceed with this profile? (y / n): ").strip().lower()

@@ -3,6 +3,7 @@
 import io
 import time
 import math
+import datetime
 import contextlib
 import warnings
 from typing import Dict, List, Optional
@@ -293,14 +294,46 @@ class DataFetcher:
                     if item.get("title")
                 ]
 
+                # ── Next earnings date ────────────────────────────────────
+                earnings_date      = None
+                earnings_days_away = None
+                try:
+                    cal   = t.calendar
+                    today = datetime.date.today()
+                    dates = []
+                    if isinstance(cal, dict):
+                        raw = cal.get("Earnings Date", [])
+                        dates = raw if isinstance(raw, list) else [raw]
+                    elif hasattr(cal, "loc"):
+                        try:
+                            dates = list(cal.loc["Earnings Date"].values)
+                        except Exception:
+                            pass
+                    for d in sorted(dates):
+                        try:
+                            d_date = d.date() if hasattr(d, "date") else (
+                                datetime.date.fromisoformat(str(d)[:10])
+                                if isinstance(d, str) else d
+                            )
+                            if d_date >= today:
+                                earnings_date      = str(d_date)
+                                earnings_days_away = (d_date - today).days
+                                break
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 return {
-                    "info":        info,
-                    "history":     history,
-                    "sector":      sector,
-                    "technical":   tech,
-                    "piotroski":   piotr,
-                    "sentiment":   sent,
-                    "news_titles": news_titles,   # raw headlines for AI & protocol
+                    "info":               info,
+                    "history":            history,
+                    "sector":             sector,
+                    "technical":          tech,
+                    "piotroski":          piotr,
+                    "sentiment":          sent,
+                    "news_titles":        news_titles,
+                    "earnings_date":      earnings_date,
+                    "earnings_days_away": earnings_days_away,
                 }
             except Exception:
                 if attempt < 2:

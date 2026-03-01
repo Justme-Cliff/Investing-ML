@@ -150,6 +150,7 @@ class ValuationEngine:
             "rr_ratio":        rr_ratio,
             "signal":          signal,
             "methods_count":   len(estimates),
+            "sensitivity":     self.dcf_sensitivity(info),
         }
 
     # ── Method 1: 2-Stage DCF ─────────────────────────────────────────────────
@@ -257,3 +258,72 @@ class ValuationEngine:
             return None
         fcf_ps = fcf / shares
         return round(fcf_ps / 0.045, 2)    # price at 4.5% FCF yield
+
+    # ── DCF Sensitivity (Bear / Base / Bull) ──────────────────────────────────
+    def dcf_sensitivity(self, info: dict) -> dict:
+        """
+        Run DCF under three growth scenarios.
+          Bear = base growth × 0.50
+          Base = blended revenue + earnings growth (same as _dcf)
+          Bull = base growth × 1.50  (capped at 30%)
+        Returns: {"Bear": {fair_value, growth_rate, signal, premium_pct}, ...}
+        """
+        fcf    = info.get("freeCashflow")
+        shares = info.get("sharesOutstanding")
+        if not fcf or not shares:
+            return {}
+        fcf, shares = float(fcf), float(shares)
+        if fcf <= 0 or shares <= 0:
+            return {}
+
+        fcf_ps = fcf / shares
+        rev_g  = float(info.get("revenueGrowth")  or 0)
+        earn_g = float(info.get("earningsGrowth") or 0)
+        base_g = min(0.25, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
+        cur    = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+
+        scenarios = {
+            "Bear": max(-0.03, base_g * 0.50),
+            "Base": base_g,
+            "Bull": min(0.30,  base_g * 1.50),
+        }
+
+        results = {}
+        for name, g in scenarios.items():
+            tg = min(0.03, max(0.01, g * 0.30))
+            dr = self.discount_rate
+
+            pv, cf = 0.0, fcf_ps
+            for yr in range(1, 6):
+                cf  = cf * (1 + g)
+                pv += cf / (1 + dr) ** yr
+
+            tv_cf = cf * (1 + tg)
+            if dr <= tg:
+                dr = tg + 0.05
+            tv    = tv_cf / (dr - tg)
+            fv    = pv + tv / (1 + dr) ** 5
+
+            # Sanity check — same as _dcf
+            if fv <= 0 or (cur and (fv > cur * 50 or fv < 0.50)):
+                fv = None
+
+            if fv:
+                prem = ((cur / fv) - 1) * 100 if cur else None
+                if   cur <= fv * 0.80: sig = "STRONG_BUY"
+                elif cur <= fv * 0.90: sig = "BUY"
+                elif cur <= fv:        sig = "HOLD_WATCH"
+                elif cur <= fv * 1.10: sig = "WAIT"
+                else:                  sig = "AVOID_PEAK"
+            else:
+                prem = None
+                sig  = "INSUFFICIENT_DATA"
+
+            results[name] = {
+                "fair_value":  round(fv, 2) if fv else None,
+                "growth_rate": round(g * 100, 1),
+                "signal":      sig,
+                "premium_pct": round(prem, 1) if prem is not None else None,
+            }
+
+        return results
