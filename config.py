@@ -1,14 +1,29 @@
 # config.py — Global constants: stock universe, weights, macro tickers, word lists
 
-# ── Optional free API keys — tool works without them; they enhance data quality ─
-# Finnhub  : https://finnhub.io          (free — 60 calls/min)
-# NewsAPI  : https://newsapi.org         (free — 100 req/day)
-# FRED     : https://fred.stlouisfed.org (free — unlimited)
-# Alpha Vantage: https://alphavantage.co (free — 25 req/day)
-FINNHUB_KEY       = ""   # company news, insider trades, earnings calendar
-NEWSAPI_KEY       = ""   # broad financial news search
-FRED_KEY          = ""   # macro series: CPI, UNRATE, FEDFUNDS, T10Y2Y, etc.
-ALPHAVANTAGE_KEY  = ""   # earnings, income statement supplements
+import os
+from dotenv import load_dotenv
+
+# Load .env from the project root (silently ignored if the file doesn't exist)
+load_dotenv()
+
+# ── Optional free API keys — loaded from .env (never hard-coded here) ─────────
+# Keys are optional — the tool works without them; they enhance data quality.
+# Copy .env.example → .env and fill in your own keys.
+FINNHUB_KEY      = os.getenv("FINNHUB_KEY",      "")   # company news, insider trades, earnings calendar
+NEWSAPI_KEY      = os.getenv("NEWSAPI_KEY",      "")   # broad financial news search
+FRED_KEY         = os.getenv("FRED_KEY",         "")   # macro series: CPI, UNRATE, FEDFUNDS, T10Y2Y, etc.
+ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")   # earnings, income statement supplements
+
+# ── Dynamic universe settings ─────────────────────────────────────────────────
+# When DYNAMIC_UNIVERSE = True the pipeline downloads ALL US-listed common
+# stocks (~4,000–6,000) from NASDAQ's free public API at startup (cached 24h).
+# UNIVERSE_MAX_TICKERS controls how many are actually scored per run.
+# Selection: top-200 by market cap are always included; the remaining slots are
+# filled with a RANDOM sample of the rest → different stocks surface every run.
+# Raise UNIVERSE_MAX_TICKERS for deeper coverage (runtime scales linearly).
+DYNAMIC_UNIVERSE        = True
+UNIVERSE_MIN_MARKET_CAP = 100_000_000   # $100 M — filters out micro-cap noise
+UNIVERSE_MAX_TICKERS    = 500           # stocks scored per run (~5–10 min)
 
 # ── Macro / benchmark tickers (all free via yfinance) ──────────────────────────
 SP500_TICKER    = "^GSPC"
@@ -16,85 +31,144 @@ VIX_TICKER      = "^VIX"
 YIELD_10Y_TICKER = "^TNX"
 
 SECTOR_ETFS = {
-    "Technology":  "XLK",
-    "Healthcare":  "XLV",
-    "Financials":  "XLF",
-    "Consumer":    "XLY",
-    "Energy":      "XLE",
-    "Industrials": "XLI",
-    "Utilities":   "XLU",
-    "Real Estate": "XLRE",
-    "Materials":   "XLB",
+    "Technology":    "XLK",
+    "Healthcare":    "XLV",
+    "Financials":    "XLF",
+    "Consumer":      "XLY",
+    "Energy":        "XLE",
+    "Industrials":   "XLI",
+    "Utilities":     "XLU",
+    "Real Estate":   "XLRE",
+    "Materials":     "XLB",
+    "Communication": "XLC",
 }
 
-# ── Stock universe: ~110 liquid stocks across 9 sectors ───────────────────────
+# ── Stock universe: ~300 liquid stocks across 10 sectors ─────────────────────
 STOCK_UNIVERSE = {
-    "Technology":  [
+    "Technology": [
+        # Mega-cap / established
         "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AVGO", "ORCL",
         "CRM", "ADBE", "AMD", "QCOM", "TXN", "NOW", "INTU",
         "AMAT", "LRCX", "KLAC", "SNPS", "CDNS", "PANW",
+        # Semiconductors
+        "INTC", "CSCO", "MU", "NXPI", "MRVL", "ON", "MPWR",
+        "HPQ", "DELL", "SMCI", "ANET", "PSTG",
+        # Cloud / cybersecurity / software
+        "CRWD", "ZS", "NET", "DDOG", "SNOW", "PLTR", "WDAY",
+        "HUBS", "TEAM", "FTNT", "OKTA", "MDB", "GTLB",
     ],
-    "Healthcare":  [
+    "Healthcare": [
+        # Mega-cap / established
         "JNJ", "UNH", "LLY", "PFE", "ABBV", "MRK", "TMO", "ABT",
         "DHR", "AMGN", "BMY", "GILD", "CI", "ISRG", "SYK",
         "BDX", "ZTS", "VRTX", "REGN", "HCA",
+        # Managed care / pharmacy
+        "CVS", "MCK", "ELV", "HUM", "CAH",
+        # Biotech / medtech
+        "BIIB", "ILMN", "IDXX", "EW", "MTD", "BAX", "HOLX",
+        "MRNA", "IQV", "DXCM", "PODD", "EXAS", "INCY", "ALNY", "GEHC",
     ],
-    "Financials":  [
+    "Financials": [
+        # Mega-cap / diversified
         "BRK-B", "JPM", "BAC", "WFC", "GS", "MS", "BLK", "AXP",
         "V", "MA", "C", "SCHW", "USB", "PNC", "COF",
         "ICE", "CME", "MCO", "SPGI", "TFC",
+        # Payments / fintech
+        "FIS", "FISV", "GPN", "PYPL", "SQ", "SOFI", "AMP",
+        # Insurance
+        "AFL", "MET", "PRU", "ALL", "TRV",
+        # Regional banks
+        "MTB", "HBAN", "RF", "KEY", "CFG", "FITB",
+        # Consumer finance
+        "ALLY", "SYF",
     ],
-    "Consumer":    [
+    "Consumer": [
+        # Staples / retail
         "WMT", "HD", "MCD", "NKE", "SBUX", "TGT", "LOW", "TJX",
         "COST", "PG", "KO", "PEP", "PM", "CL", "KMB",
         "GIS", "K", "HSY", "MDLZ", "YUM",
+        # E-commerce / autos / marketplace
+        "AMZN", "TSLA", "EBAY", "ETSY", "LULU", "ROST",
+        "DG", "DLTR", "BBY", "F", "GM", "KR", "UBER",
+        # Travel / leisure / restaurants
+        "BKNG", "EXPE", "MAR", "HLT", "CMG", "DRI", "QSR",
     ],
-    "Energy":      [
+    "Energy": [
+        # Integrated / E&P
         "XOM", "CVX", "COP", "EOG", "SLB", "MPC", "VLO", "PSX",
         "OXY", "KMI", "WMB", "LNG", "DVN", "HES", "BKR",
+        # E&P / oilfield services
+        "APA", "FANG", "HAL", "CTRA", "RIG",
+        # Midstream
+        "TRGP", "OKE", "ET", "MPLX", "WES",
     ],
     "Industrials": [
+        # Diversified / transport
         "CAT", "HON", "UPS", "RTX", "LMT", "GE", "MMM", "DE",
         "EMR", "ETN", "PH", "ROK", "ITW", "NSC", "UNP",
         "CSX", "FDX", "WM", "RSG", "FAST",
+        # Aerospace / defense
+        "BA", "LHX", "GD", "NOC", "TDG", "LDOS",
+        # Specialty / automation
+        "CARR", "OTIS", "CPRT", "ROP", "VRSK", "CTAS",
+        "GWW", "SWK", "XYL", "GNRC", "IR", "AME", "AXON",
     ],
-    "Utilities":   [
+    "Utilities": [
+        # Established
         "NEE", "DUK", "SO", "D", "AEP", "EXC", "XEL", "SRE", "PEG", "ED",
+        # Mid-cap utilities
+        "AWK", "WEC", "ES", "EIX", "PPL", "CNP", "AEE", "NI", "DTE", "ETR",
     ],
     "Real Estate": [
+        # REITs — established
         "AMT", "PLD", "CCI", "EQIX", "PSA", "SPG", "O", "WELL", "AVB", "EQR",
+        # REITs — diversified / specialty
+        "DLR", "VTR", "ARE", "BXP", "KIM", "NNN", "STAG", "IRM", "VICI", "CBRE",
     ],
-    "Materials":   [
+    "Materials": [
+        # Chemicals / mining
         "LIN", "APD", "ECL", "SHW", "FCX", "NEM", "NUE", "VMC", "MLM", "ALB",
+        # Specialty chemicals / packaging
+        "DD", "PPG", "IFF", "RPM", "CE", "LYB", "MOS", "CF", "IP", "PKG",
+    ],
+    "Communication": [
+        # Streaming / media
+        "NFLX", "DIS", "CMCSA", "WBD",
+        # Telecom
+        "T", "VZ", "CHTR", "TMUS",
+        # Entertainment / gaming / advertising
+        "LYV", "OMC", "IPG", "TTWO", "EA", "FOXA",
     ],
 }
 
 # ── Sector median EV/EBITDA multiples (approximate) ──────────────────────────
 SECTOR_EV_EBITDA = {
-    "Technology":  22,
-    "Healthcare":  16,
-    "Financials":  12,
-    "Consumer":    16,
-    "Energy":       8,
-    "Industrials": 14,
-    "Utilities":   12,
-    "Real Estate": 20,
-    "Materials":   10,
-    "Unknown":     14,
+    "Technology":    22,
+    "Healthcare":    16,
+    "Financials":    12,
+    "Consumer":      16,
+    "Energy":         8,
+    "Industrials":   14,
+    "Utilities":     12,
+    "Real Estate":   20,
+    "Materials":     10,
+    "Communication": 18,
+    "Unknown":       14,
 }
 
 # ── Sector median P/E ratios (approximate, updated periodically) ──────────────
 SECTOR_MEDIAN_PE = {
-    "Technology":  28,
-    "Healthcare":  22,
-    "Financials":  14,
-    "Consumer":    24,
-    "Energy":      12,
-    "Industrials": 20,
-    "Utilities":   18,
-    "Real Estate": 35,
-    "Materials":   16,
-    "Unknown":     20,
+    "Technology":    28,
+    "Healthcare":    22,
+    "Financials":    14,
+    "Consumer":      24,
+    "Energy":        12,
+    "Industrials":   20,
+    "Utilities":     18,
+    "Real Estate":   35,
+    "Materials":     16,
+    "Communication": 24,
+    "Unknown":       20,
 }
 
 # ── 7-factor weight matrix ────────────────────────────────────────────────────
@@ -149,19 +223,19 @@ GOAL_LABELS = {
 # ── Macro regime sector tilts (points added to composite score post-normalise) ─
 MACRO_TILTS = {
     "risk_on": {
-        "Technology": +4, "Consumer": +3, "Financials": +2,
+        "Technology": +4, "Consumer": +3, "Financials": +2, "Communication": +3,
         "Utilities": -5, "Real Estate": -3,
     },
     "risk_off": {
         "Utilities": +7, "Healthcare": +5, "Consumer": +3,
-        "Technology": -4, "Energy": -2,
+        "Technology": -4, "Energy": -2, "Communication": -2,
     },
     "rising_rate": {
         "Financials": +5, "Energy": +3,
-        "Real Estate": -7, "Utilities": -5, "Technology": -2,
+        "Real Estate": -7, "Utilities": -5, "Technology": -2, "Communication": -2,
     },
     "falling_rate": {
-        "Real Estate": +5, "Utilities": +5, "Technology": +3,
+        "Real Estate": +5, "Utilities": +5, "Technology": +3, "Communication": +2,
         "Financials": -3,
     },
     "neutral": {},

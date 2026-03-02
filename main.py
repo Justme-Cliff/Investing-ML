@@ -12,7 +12,10 @@ import sys
 import warnings
 warnings.filterwarnings("ignore")
 
-from config import STOCK_UNIVERSE
+from config import (
+    STOCK_UNIVERSE, DYNAMIC_UNIVERSE,
+    UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
+)
 
 from advisor.collector    import InputCollector
 from advisor.fetcher      import DataFetcher, MacroFetcher
@@ -52,16 +55,36 @@ def main():
     display.show_weight_adaptation(adapted_weights)
 
     # ── 3. Fetch stock data ───────────────────────────────────────────────────
-    all_tickers = [
-        t for sector, tlist in STOCK_UNIVERSE.items()
-        for t in tlist
-        if sector not in profile.excluded_sectors
-        and t not in profile.existing_tickers
-    ]
-    all_tickers = list(dict.fromkeys(all_tickers))   # dedupe
+    if DYNAMIC_UNIVERSE:
+        from advisor.universe import fetch_us_universe
+        all_tickers = fetch_us_universe(
+            min_market_cap=UNIVERSE_MIN_MARKET_CAP,
+            max_tickers=UNIVERSE_MAX_TICKERS,
+        )
+        # Remove tickers the user already holds
+        all_tickers = [t for t in all_tickers if t not in profile.existing_tickers]
+    else:
+        all_tickers = [
+            t for sector, tlist in STOCK_UNIVERSE.items()
+            for t in tlist
+            if sector not in profile.excluded_sectors
+            and t not in profile.existing_tickers
+        ]
+        all_tickers = list(dict.fromkeys(all_tickers))
 
     fetcher       = DataFetcher(profile.yf_period)
     universe_data = fetcher.fetch_universe(all_tickers)
+
+    # Post-fetch sector exclusion (applies in both modes)
+    if profile.excluded_sectors and universe_data:
+        before = len(universe_data)
+        universe_data = {
+            t: d for t, d in universe_data.items()
+            if d.get("sector", "Unknown") not in profile.excluded_sectors
+        }
+        removed = before - len(universe_data)
+        if removed:
+            print(f"  Excluded {removed} stocks in sectors: {profile.excluded_sectors}")
     sp500_hist    = fetcher.fetch_sp500()
 
     if not universe_data:

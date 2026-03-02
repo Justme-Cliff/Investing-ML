@@ -356,7 +356,7 @@ class DataFetcher:
             "Real Estate": "Real Estate",
             "Basic Materials": "Materials",
             "Materials": "Materials",
-            "Communication Services": "Technology",
+            "Communication Services": "Communication",
         }
         if yf_sector in MAP:
             return MAP[yf_sector]

@@ -463,6 +463,160 @@
           }
         }
       ]
+    },
+    {
+      "session_id": "1a59d81d",
+      "timestamp": "2026-03-02T00:43:56.370963+00:00",
+      "profile": {
+        "risk_level": 3,
+        "time_horizon": "long",
+        "goal": "income"
+      },
+      "sp500_entry": 6878.8798828125,
+      "evaluated": false,
+      "evaluation": null,
+      "picks": [
+        {
+          "ticker": "MSFT",
+          "price_entry": 392.739990234375,
+          "composite_score": 72.91429152662388,
+          "factors": {
+            "momentum": 15.255704312196627,
+            "volatility": 72.42272049854904,
+            "value": 90.57462340761133,
+            "quality": 76.32789548350382,
+            "technical": 46.83981509441167,
+            "sentiment": 100.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "JNJ",
+          "price_entry": 248.42999267578125,
+          "composite_score": 72.12824406588224,
+          "factors": {
+            "momentum": 41.648674030063596,
+            "volatility": 97.63987615055679,
+            "value": 83.20097940132752,
+            "quality": 66.25930040591332,
+            "technical": 37.59467259668635,
+            "sentiment": 66.66666666666664,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "ITW",
+          "price_entry": 290.6300048828125,
+          "composite_score": 70.79791555402238,
+          "factors": {
+            "momentum": 26.805920547708585,
+            "volatility": 86.62389641404977,
+            "value": 74.32195517934595,
+            "quality": 69.67091056129392,
+            "technical": 63.370392662923024,
+            "sentiment": 13.333333333333345,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "ZTS",
+          "price_entry": 131.10000610351562,
+          "composite_score": 70.50197642217665,
+          "factors": {
+            "momentum": 13.45679655822697,
+            "volatility": 71.60689435431192,
+            "value": 86.42543542383389,
+            "quality": 75.11559676396075,
+            "technical": 56.00678647060345,
+            "sentiment": 66.66666666666664,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "MMM",
+          "price_entry": 165.32000732421875,
+          "composite_score": 70.35881466531988,
+          "factors": {
+            "momentum": 22.681911550512414,
+            "volatility": 68.08982170652314,
+            "value": 78.54822575957202,
+            "quality": 62.67022668879889,
+            "technical": 68.25111358401811,
+            "sentiment": 66.66666666666664,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "TMO",
+          "price_entry": 521.1099853515625,
+          "composite_score": 70.04713129690577,
+          "factors": {
+            "momentum": 21.78994336144796,
+            "volatility": 71.52289967612617,
+            "value": 77.0276690910899,
+            "quality": 66.85968875118468,
+            "technical": 66.68692167575388,
+            "sentiment": 100.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "V",
+          "price_entry": 320.1400146484375,
+          "composite_score": 69.84458526926682,
+          "factors": {
+            "momentum": 16.66285176807939,
+            "volatility": 81.93984670020646,
+            "value": 58.142819231255096,
+            "quality": 77.98501239739237,
+            "technical": 69.90955524248211,
+            "sentiment": 100.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "AVGO",
+          "price_entry": 319.54998779296875,
+          "composite_score": 69.75315084553449,
+          "factors": {
+            "momentum": 32.22538577073435,
+            "volatility": 29.539223476945804,
+            "value": 74.87062823176976,
+            "quality": 74.54488324679241,
+            "technical": 51.6189154603157,
+            "sentiment": 100.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "LNG",
+          "price_entry": 235.72999572753906,
+          "composite_score": 68.70090146474612,
+          "factors": {
+            "momentum": 22.52263094505297,
+            "volatility": 63.3817422388384,
+            "value": 85.05495757902848,
+            "quality": 61.964396538004976,
+            "technical": 30.545671484807652,
+            "sentiment": 100.0,
+            "dividend": 100.0
+          }
+        },
+        {
+          "ticker": "REGN",
+          "price_entry": 781.6699829101562,
+          "composite_score": 66.40350084588268,
+          "factors": {
+            "momentum": 29.7445369273999,
+            "volatility": 61.75437586260993,
+            "value": 86.68324387894154,
+            "quality": 50.49710509799219,
+            "technical": 73.21957617292964,
+            "sentiment": 66.66666666666664,
+            "dividend": 100.0
+          }
+        }
+      ]
     }
   ]
 }

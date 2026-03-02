@@ -1,0 +1,41 @@
+# ── Secrets & private project context ────────────────────────────────────────
+.env
+CLAUDE.md
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+.env/
+
+# ── Generated outputs ─────────────────────────────────────────────────────────
+Book1.xlsx
+chart1_score_breakdown.png
+chart2_performance.png
+chart3_factor_heatmap.png
+chart4_macro_dashboard.png
+chart5_quant_protocol.png
+
+# ── Cache & session data ──────────────────────────────────────────────────────
+memory/history.json
+memory/universe_cache.json
+memory/settings.json
+memory/watchlist.json
+
+# ── OS & editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

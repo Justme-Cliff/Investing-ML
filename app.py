@@ -26,6 +26,7 @@ from plotly.subplots import make_subplots
 from config import (
     STOCK_UNIVERSE, WEIGHT_MATRIX, FACTOR_NAMES,
     RISK_LABELS, GOAL_LABELS, HORIZON_LABELS,
+    DYNAMIC_UNIVERSE, UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
 )
 from advisor.collector    import UserProfile
 from advisor.fetcher      import DataFetcher, MacroFetcher
@@ -812,16 +813,33 @@ def run_analysis(profile: UserProfile) -> dict:
     res  = {}
     prog = st.progress(0, text="Fetching stock data from Yahoo Finance…")
 
-    all_tickers = [
-        t for sector, tlist in STOCK_UNIVERSE.items()
-        for t in tlist
-        if sector not in profile.excluded_sectors
-        and t not in profile.existing_tickers
-    ]
-    all_tickers = list(dict.fromkeys(all_tickers))
+    if DYNAMIC_UNIVERSE:
+        from advisor.universe import fetch_us_universe
+        all_tickers = fetch_us_universe(
+            min_market_cap=UNIVERSE_MIN_MARKET_CAP,
+            max_tickers=UNIVERSE_MAX_TICKERS,
+            verbose=False,
+        )
+        all_tickers = [t for t in all_tickers if t not in profile.existing_tickers]
+    else:
+        all_tickers = [
+            t for sector, tlist in STOCK_UNIVERSE.items()
+            for t in tlist
+            if sector not in profile.excluded_sectors
+            and t not in profile.existing_tickers
+        ]
+        all_tickers = list(dict.fromkeys(all_tickers))
 
     fetcher              = DataFetcher(profile.yf_period)
     res["universe_data"] = fetcher.fetch_universe(all_tickers)
+
+    # Post-fetch sector exclusion (applies in both modes)
+    if profile.excluded_sectors and res["universe_data"]:
+        res["universe_data"] = {
+            t: d for t, d in res["universe_data"].items()
+            if d.get("sector", "Unknown") not in profile.excluded_sectors
+        }
+
     res["sp500_hist"]    = fetcher.fetch_sp500()
     prog.progress(28, text="Fetching macro data (VIX · 10Y yield · sector ETFs)…")
 
