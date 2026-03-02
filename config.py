@@ -238,6 +238,15 @@ MACRO_TILTS = {
         "Real Estate": +5, "Utilities": +5, "Technology": +3, "Communication": +2,
         "Financials": -3,
     },
+    "crisis": {
+        "Utilities": +15, "Healthcare": +10,
+        "Technology": -15, "Real Estate": -12, "Financials": -10,
+        "Consumer": -5, "Energy": -5, "Materials": -8, "Industrials": -8, "Communication": -5,
+    },
+    "pre_crisis": {
+        "Utilities": +8, "Healthcare": +6,
+        "Technology": -6, "Real Estate": -6, "Financials": -5, "Materials": -3,
+    },
     "neutral": {},
 }
 

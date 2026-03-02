@@ -15,6 +15,7 @@ warnings.filterwarnings("ignore")
 from config import (
     STOCK_UNIVERSE, DYNAMIC_UNIVERSE,
     UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
+    WEIGHT_MATRIX,
 )
 
 from advisor.collector    import InputCollector
@@ -109,7 +110,65 @@ def main():
 
     print(f"  Done — {len(ranked_df)} stocks scored.\n")
 
-    # ── 5b. Apply fresh-picks penalty (optional) ──────────────────────────────
+    # ── 5b. Apply learned intelligence (pattern + sector + regime) ────────────
+    regime = macro_data.get("regime", "neutral")
+
+    # Dynamic sector tilts (Layer 6: learned from observed sector performance)
+    dynamic_tilts = memory.get_dynamic_sector_tilts(regime)
+    if dynamic_tilts:
+        for sector, tilt in dynamic_tilts.items():
+            mask = ranked_df["sector"] == sector
+            ranked_df.loc[mask, "composite_score"] = (
+                ranked_df.loc[mask, "composite_score"] + tilt
+            ).clip(0, 100)
+
+    # Sector-specific factor weight adjustments (Layer 2)
+    sector_adj_applied = 0
+    for sector in ranked_df["sector"].unique():
+        adj = memory.get_sector_weight_adjustments(sector)
+        if not adj:
+            continue
+        base_w = list(adapted_weights or WEIGHT_MATRIX.get(
+            (profile.risk_level, profile.time_horizon), [1/7]*7
+        ))
+        factor_names_local = ["momentum", "volatility", "value", "quality",
+                               "technical", "sentiment", "dividend"]
+        adjusted_w = [base_w[i] * adj.get(factor_names_local[i], 1.0)
+                      for i in range(len(base_w))]
+        total = sum(adjusted_w) or 1.0
+        adjusted_w = [w / total for w in adjusted_w]
+        mask = ranked_df["sector"] == sector
+        score_cols = [f"{f}_score" for f in factor_names_local]
+        available  = [c for c in score_cols if c in ranked_df.columns]
+        if len(available) == len(factor_names_local):
+            adj_composite = sum(
+                adjusted_w[i] * ranked_df.loc[mask, score_cols[i]]
+                for i in range(len(factor_names_local))
+            )
+            ranked_df.loc[mask, "composite_score"] = (
+                ranked_df.loc[mask, "composite_score"] * 0.6 + adj_composite * 0.4
+            ).clip(0, 100)
+            sector_adj_applied += int(mask.sum())
+
+    # Pattern bonus (Layer 4: similarity to historical winners/losers)
+    pattern_bonuses = memory.get_all_pattern_bonuses(universe_data, ranked_df, regime)
+    if pattern_bonuses:
+        for ticker, bonus in pattern_bonuses.items():
+            mask = ranked_df["ticker"] == ticker
+            if mask.any():
+                ranked_df.loc[mask, "composite_score"] = (
+                    ranked_df.loc[mask, "composite_score"] + bonus
+                ).clip(0, 100)
+        n_adj = sum(1 for b in pattern_bonuses.values() if abs(b) > 0.5)
+        print(f"  Intelligence applied: "
+              f"{n_adj} pattern bonuses · "
+              f"{len(dynamic_tilts)} sector tilts · "
+              f"{sector_adj_applied} sector-weight adjustments\n")
+
+    ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
+    ranked_df["rank"] = range(1, len(ranked_df) + 1)
+
+    # ── 5c. Apply fresh-picks penalty (optional) ──────────────────────────────
     if profile.avoid_recent:
         recent_tickers = memory.get_recent_tickers(n_sessions=2)
         if recent_tickers:
@@ -174,7 +233,12 @@ def main():
     sp500_price = 0.0
     if sp500_hist is not None and len(sp500_hist) > 0:
         sp500_price = float(sp500_hist["Close"].iloc[-1])
-    memory.save_session(profile, top10_sized, sp500_price)
+    memory.save_session(
+        profile, top10_sized, sp500_price,
+        macro_data=macro_data,
+        valuation_results=valuation_results,
+        universe_data=universe_data,
+    )
     memory.save()
 
     # ── 15. Disclaimer + show charts ─────────────────────────────────────────

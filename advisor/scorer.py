@@ -79,6 +79,18 @@ class MultiFactorScorer:
 
         df = self._apply_macro_tilt(df)
 
+        # ── Distress penalty + hard exclusion (survivorship bias mitigation) ────
+        # Stocks showing multiple financial distress signals get penalised.
+        # This prevents a high-momentum distressed company from sneaking into
+        # the top-10 and later going bankrupt / delisting.
+        if "distress_flags" in df.columns:
+            df["composite_score"] = (
+                df["composite_score"] - df["distress_flags"] * 5.0
+            ).clip(lower=0)
+            # Hard-exclude maximum distress (3 flags = near-certain financial distress).
+            # Soft penalty of -15pts is insufficient when all 5 danger signals fire.
+            df = df[df["distress_flags"] < 3].reset_index(drop=True)
+
         if self.profile.income_focused:
             df["composite_score"] += df["dividend_score"] * 0.08
             df["composite_score"]  = df["composite_score"].clip(upper=100)
@@ -211,6 +223,20 @@ class MultiFactorScorer:
                    "sell": -0.15, "strong_sell": -0.25}.get(rec, 0)
         sentiment_raw = max(0.0, min(1.0, sentiment_raw + rec_adj))
 
+        # Insider trading signal (Finnhub): net buy pressure boosts sentiment
+        # +1 = all insiders buying  |  -1 = all insiders selling
+        insider_signal = data.get("insider_signal", 0.0) or 0.0
+        if insider_signal != 0.0:
+            insider_adj   = insider_signal * 0.12          # max ±0.12 nudge
+            sentiment_raw = max(0.0, min(1.0, sentiment_raw + insider_adj))
+
+        # Earnings surprise signal (Finnhub): recent positive surprises → momentum boost
+        eps_surprise = data.get("earnings_surprise_avg")
+        if eps_surprise is not None:
+            # Clamp to ±50% surprise, map to ±0.06 momentum nudge
+            eps_adj = max(-0.06, min(0.06, float(eps_surprise) * 0.12))
+            momentum_raw = momentum_raw + eps_adj
+
         # ── 7. Dividend ───────────────────────────────────────────────────────
         div = float(info.get("dividendYield", 0) or 0)
         div = min(div, 0.15)
@@ -219,6 +245,29 @@ class MultiFactorScorer:
         # Filter fields
         beta       = float(info.get("beta",      1.0) or 1.0)
         market_cap = float(info.get("marketCap", 0)   or 0)
+
+        # ── Distress flags (count of danger signals) ──────────────────────────
+        # Each flag = -5pts on composite (see score_all). Max penalty = -15 pts.
+        # Addresses survivorship bias: identifies potential future delistings.
+        distress = 0
+        ocf = info.get("operatingCashflow")
+        if ocf is not None and float(ocf) < 0:
+            distress += 1                                          # burning cash
+        ni = info.get("netIncomeToCommon") or info.get("netIncome")
+        if ni is not None and float(ni) < 0:
+            distress += 1                                          # losing money
+        de = info.get("debtToEquity")
+        if de is not None:
+            de_r = float(de) / 100 if float(de) > 10 else float(de)
+            if de_r > 4.0:
+                distress += 1                                      # dangerously levered
+        cr = info.get("currentRatio")
+        if cr is not None and float(cr) < 1.0:
+            distress += 1                                          # can't cover short-term debt
+        fcf = info.get("freeCashflow")
+        if fcf is not None and float(fcf) < 0:
+            distress += 1                                          # negative free cash flow
+        distress = min(distress, 3)   # cap at 3 flags = max -15 pt penalty
 
         return {
             "ticker":         ticker,
@@ -235,6 +284,7 @@ class MultiFactorScorer:
             "sentiment_raw":  sentiment_raw,
             "dividend_raw":   dividend_raw,
             "div_pct":        div * 100,
+            "distress_flags": distress,
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────

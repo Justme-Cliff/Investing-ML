@@ -853,6 +853,55 @@ def run_analysis(profile: UserProfile) -> dict:
     scorer  = MultiFactorScorer(profile, res["macro_data"], adapted)
     ranked_df = scorer.score_all(res["universe_data"])
 
+    # ── Apply learned intelligence (pattern + sector + regime) ────────────────
+    regime = res["macro_data"].get("regime", "neutral")
+
+    # Layer 6: dynamic sector tilts from observed sector performance
+    dynamic_tilts = memory.get_dynamic_sector_tilts(regime)
+    for sector, tilt in dynamic_tilts.items():
+        mask = ranked_df["sector"] == sector
+        ranked_df.loc[mask, "composite_score"] = (
+            ranked_df.loc[mask, "composite_score"] + tilt
+        ).clip(0, 100)
+
+    # Layer 2: sector-specific factor weight adjustments
+    from config import WEIGHT_MATRIX as _WM
+    factor_names_local = ["momentum", "volatility", "value", "quality",
+                           "technical", "sentiment", "dividend"]
+    for sector in ranked_df["sector"].unique():
+        adj = memory.get_sector_weight_adjustments(sector)
+        if not adj:
+            continue
+        base_w = list(adapted or _WM.get(
+            (profile.risk_level, profile.time_horizon), [1/7]*7
+        ))
+        adjusted_w = [base_w[i] * adj.get(factor_names_local[i], 1.0)
+                      for i in range(len(base_w))]
+        total = sum(adjusted_w) or 1.0
+        adjusted_w = [w / total for w in adjusted_w]
+        mask       = ranked_df["sector"] == sector
+        score_cols = [f"{f}_score" for f in factor_names_local]
+        if all(c in ranked_df.columns for c in score_cols):
+            adj_composite = sum(
+                adjusted_w[i] * ranked_df.loc[mask, score_cols[i]]
+                for i in range(len(factor_names_local))
+            )
+            ranked_df.loc[mask, "composite_score"] = (
+                ranked_df.loc[mask, "composite_score"] * 0.6 + adj_composite * 0.4
+            ).clip(0, 100)
+
+    # Layer 4: pattern bonuses (similarity to historical winners/losers)
+    pattern_bonuses = memory.get_all_pattern_bonuses(res["universe_data"], ranked_df, regime)
+    for ticker, bonus in pattern_bonuses.items():
+        mask = ranked_df["ticker"] == ticker
+        if mask.any():
+            ranked_df.loc[mask, "composite_score"] = (
+                ranked_df.loc[mask, "composite_score"] + bonus
+            ).clip(0, 100)
+
+    ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
+    ranked_df["rank"] = range(1, len(ranked_df) + 1)
+
     # Fresh picks mode: penalise tickers from recent sessions
     if profile.avoid_recent:
         _cfg           = st.session_state.get("settings", DEFAULT_SETTINGS)
@@ -897,7 +946,12 @@ def run_analysis(profile: UserProfile) -> dict:
             sp500_price = float(sp500_h["Close"].iloc[-1])
         else:
             sp500_price = 0.0
-        memory.save_session(profile, res["top10"], sp500_price)
+        memory.save_session(
+            profile, res["top10"], sp500_price,
+            macro_data=res.get("macro_data"),
+            valuation_results=res.get("valuation"),
+            universe_data=res.get("universe_data"),
+        )
         memory.save()
     except Exception as _mem_err:
         pass   # never block the UI over a save failure
@@ -2639,57 +2693,90 @@ def _normalize_yf(df) -> "pd.DataFrame":
     return df
 
 
-def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: float, stop: float) -> list:
+def _run_backtest_simulation(hist: "pd.DataFrame", *args, **kwargs) -> list:
     """
-    Simulate the valuation entry strategy on historical prices.
-    Entry : price <= entry_low (in the buy zone)
-    Exit  : price >= target (take profit) OR price <= stop (stop loss)
-    Returns list of trade dicts.
+    Honest backtest using ONLY historical price signals — zero look-ahead bias.
+
+    The old version applied today's DCF/fair-value levels to past prices, which
+    is cheating (you couldn't have known those numbers back then).
+
+    New strategy (purely look-back):
+      Entry : RSI(14) drops below 38 AND price is above its 150-day SMA
+              → oversold dip inside an established uptrend
+      Exit  : +25% from entry  (take profit)
+           OR −12% from entry  (stop loss)
+           OR RSI rises above 72 (overbought — trim position)
+           OR 120 trading days held (position timeout)
     """
-    trades = []
-    in_trade = False
+    import numpy as np
+
+    hist   = _normalize_yf(hist)
+    closes = hist["Close"].squeeze().dropna()
+    if len(closes) < 160:
+        return []
+
+    # ── Compute RSI(14) ───────────────────────────────────────────────────────
+    delta  = closes.diff()
+    gain   = delta.clip(lower=0)
+    loss   = (-delta).clip(lower=0)
+    avg_g  = gain.ewm(com=13, adjust=False).mean()
+    avg_l  = loss.ewm(com=13, adjust=False).mean()
+    rs     = avg_g / avg_l.replace(0, np.nan)
+    rsi    = (100 - 100 / (1 + rs)).fillna(50)
+
+    # ── Compute 150-day SMA ───────────────────────────────────────────────────
+    sma150 = closes.rolling(150).mean()
+
+    trades      = []
+    in_trade    = False
     entry_price = None
     entry_date  = None
+    days_held   = 0
 
-    hist = _normalize_yf(hist)
-    prices = hist["Close"].squeeze().dropna()
-    for date, price in prices.items():
-        price = float(price)
+    dates = list(closes.index)
+    for i, date in enumerate(dates):
+        price    = float(closes.iloc[i])
+        rsi_val  = float(rsi.iloc[i])
+        sma_val  = sma150.iloc[i]
+        sma_valid = (sma_val is not None and not (isinstance(sma_val, float) and np.isnan(sma_val)))
+
         if not in_trade:
-            if price <= entry_low:
+            # Entry: oversold RSI + price in uptrend (above 150d SMA)
+            if rsi_val < 38 and sma_valid and price > float(sma_val):
                 in_trade    = True
                 entry_price = price
                 entry_date  = date
+                days_held   = 0
         else:
-            if price >= target:
-                ret = (price - entry_price) / entry_price * 100
+            days_held += 1
+            ret = (price - entry_price) / entry_price * 100
+
+            exit_reason = None
+            if ret >= 25.0:
+                exit_reason = "Target hit (+25%)"
+            elif ret <= -12.0:
+                exit_reason = "Stop loss (−12%)"
+            elif rsi_val > 72:
+                exit_reason = "RSI overbought exit"
+            elif days_held >= 120:
+                exit_reason = "120-day timeout"
+
+            if exit_reason:
                 trades.append({
                     "entry_date": str(entry_date)[:10],
                     "entry":      round(entry_price, 2),
                     "exit_date":  str(date)[:10],
                     "exit":       round(price, 2),
                     "return_pct": round(ret, 2),
-                    "reason":     "Target hit",
-                    "won":        True,
-                })
-                in_trade = False
-            elif price <= stop:
-                ret = (price - entry_price) / entry_price * 100
-                trades.append({
-                    "entry_date": str(entry_date)[:10],
-                    "entry":      round(entry_price, 2),
-                    "exit_date":  str(date)[:10],
-                    "exit":       round(price, 2),
-                    "return_pct": round(ret, 2),
-                    "reason":     "Stop loss",
-                    "won":        False,
+                    "reason":     exit_reason,
+                    "won":        ret > 0,
                 })
                 in_trade = False
 
-    # Open position — mark-to-market
+    # Mark-to-market any open position
     if in_trade:
-        last_price = float(prices.iloc[-1])
-        last_date  = prices.index[-1]
+        last_price = float(closes.iloc[-1])
+        last_date  = closes.index[-1]
         ret = (last_price - entry_price) / entry_price * 100
         trades.append({
             "entry_date": str(entry_date)[:10],
@@ -2705,13 +2792,32 @@ def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: flo
 
 
 def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rate: float):
-    """Portfolio-wide backtest: simulate valuation entry strategy on all 10 picks vs S&P 500."""
+    """Portfolio-wide backtest: honest technical entry strategy vs S&P 500."""
     import yfinance as yf
 
     st.markdown(
-        shdr("Portfolio Backtest", "Simulate our valuation entry strategy on the full 10-stock basket vs S&P 500"),
+        shdr("Portfolio Backtest", "RSI oversold + uptrend entry strategy — no look-ahead bias"),
         unsafe_allow_html=True,
     )
+
+    # ── Methodology + bias warnings ───────────────────────────────────────────
+    st.markdown(f"""
+    <div style="background:{AMBER_LT};border-left:4px solid {AMBER};border-radius:8px;
+                padding:14px 18px;margin-bottom:18px;font-size:13px;color:{TEXT}">
+      <b>📊 How this backtest works (honest version)</b><br><br>
+      <b>Entry signal:</b> RSI(14) drops below 38 <i>while</i> price is above its 150-day moving average
+      — buying an oversold dip inside an established uptrend.<br>
+      <b>Exit:</b> +25% profit target · −12% stop loss · RSI > 72 overbought · or 120-day max hold.<br><br>
+      <b>⚠️ Known limitations (be honest with yourself):</b><br>
+      • <b>Survivorship bias</b> — this only tests stocks that still exist today. Companies that went
+        bankrupt or were delisted during the period are NOT included, so results look better than
+        real-world would have been.<br>
+      • <b>Slippage &amp; liquidity</b> — assumes perfect execution at close prices. Real fills are worse.<br>
+      • <b>Past ≠ future</b> — a strategy that worked historically can still fail going forward.<br><br>
+      The distress penalty (−5 to −15 pts per financial danger signal) applied during scoring already
+      pushes heavily distressed stocks out of the top-10 to reduce future delisting risk.
+    </div>
+    """, unsafe_allow_html=True)
 
     if top10 is None or (hasattr(top10, "__len__") and len(top10) == 0):
         st.markdown(

@@ -12,10 +12,13 @@ import numpy as np
 import pandas as pd
 import yfinance as yf
 
+import requests
+
 from config import (
     SP500_TICKER, VIX_TICKER, YIELD_10Y_TICKER,
     SECTOR_ETFS, STOCK_UNIVERSE, MACRO_TILTS,
     POSITIVE_WORDS, NEGATIVE_WORDS,
+    FINNHUB_KEY, ALPHAVANTAGE_KEY,
 )
 
 warnings.filterwarnings("ignore")
@@ -324,16 +327,21 @@ class DataFetcher:
                 except Exception:
                     pass
 
+                # ── Finnhub supplemental signals (optional, non-blocking) ──────
+                finnhub = self._fetch_finnhub_signals(ticker)
+
                 return {
-                    "info":               info,
-                    "history":            history,
-                    "sector":             sector,
-                    "technical":          tech,
-                    "piotroski":          piotr,
-                    "sentiment":          sent,
-                    "news_titles":        news_titles,
-                    "earnings_date":      earnings_date,
-                    "earnings_days_away": earnings_days_away,
+                    "info":                  info,
+                    "history":               history,
+                    "sector":                sector,
+                    "technical":             tech,
+                    "piotroski":             piotr,
+                    "sentiment":             sent,
+                    "news_titles":           news_titles,
+                    "earnings_date":         earnings_date,
+                    "earnings_days_away":    earnings_days_away,
+                    "insider_signal":        finnhub.get("insider_signal",        0.0),
+                    "earnings_surprise_avg": finnhub.get("earnings_surprise_avg", None),
                 }
             except Exception:
                 if attempt < 2:
@@ -365,6 +373,64 @@ class DataFetcher:
                 return sector
         return "Unknown"
 
+    def _fetch_finnhub_signals(self, ticker: str) -> dict:
+        """
+        Fetch supplemental signals from Finnhub (free tier: 60 calls/min).
+        Returns:
+          insider_signal       float  [-1, +1]  net insider buy pressure
+          earnings_surprise_avg float | None    avg EPS surprise % (last 4 qtrs)
+        Returns empty dict if no API key or request fails.
+        """
+        if not FINNHUB_KEY:
+            return {}
+
+        result = {}
+        base   = "https://finnhub.io/api/v1"
+        headers = {"X-Finnhub-Token": FINNHUB_KEY}
+
+        # ── 1. Insider transactions (last 90 days) ────────────────────────────
+        try:
+            today      = datetime.date.today()
+            from_date  = (today - datetime.timedelta(days=90)).isoformat()
+            r = requests.get(
+                f"{base}/stock/insider-transactions",
+                params={"symbol": ticker, "from": from_date},
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                buys  = sum(float(tx.get("share", 0)) for tx in data if str(tx.get("transactionCode", "")).upper() == "P")
+                sells = sum(abs(float(tx.get("share", 0))) for tx in data if str(tx.get("transactionCode", "")).upper() == "S")
+                total = buys + sells
+                if total > 0:
+                    result["insider_signal"] = (buys - sells) / total   # -1 to +1
+        except Exception:
+            pass
+
+        # ── 2. Earnings surprise (last 4 quarters) ────────────────────────────
+        try:
+            r = requests.get(
+                f"{base}/stock/earnings",
+                params={"symbol": ticker, "limit": 4},
+                headers=headers,
+                timeout=5,
+            )
+            if r.status_code == 200:
+                quarters = r.json()
+                surprises = []
+                for q in quarters:
+                    actual   = q.get("actual")
+                    estimate = q.get("estimate")
+                    if actual is not None and estimate and abs(float(estimate)) > 0.01:
+                        surprises.append((float(actual) - float(estimate)) / abs(float(estimate)))
+                if surprises:
+                    result["earnings_surprise_avg"] = float(np.mean(surprises))
+        except Exception:
+            pass
+
+        return result
+
     @staticmethod
     def strip_tz(s: pd.Series) -> pd.Series:
         if hasattr(s.index, "tz") and s.index.tz is not None:
@@ -381,32 +447,76 @@ class MacroFetcher:
     """Fetches macro indicators (VIX, yields, sector ETFs) from yfinance."""
 
     def fetch(self) -> dict:
-        print("Fetching macro data (VIX · 10Y yield · sector ETFs)...")
+        print("Fetching macro data (VIX · 10Y yield · sector ETFs · crash signals)...")
         result = {
-            "vix":            None,
-            "vix_hist":       None,
-            "yield_10y":      None,
-            "yield_hist":     None,
-            "sector_etf":     {},
-            "regime":         "neutral",
-            "regime_reasons": [],
+            "vix":                 None,
+            "vix_hist":            None,
+            "yield_10y":           None,
+            "yield_hist":          None,
+            "yield_3m":            None,
+            "vix_velocity":        None,
+            "credit_stress":       False,
+            "market_drawdown_pct": 0.0,
+            "crash_signals":       0,
+            "sector_etf":          {},
+            "regime":              "neutral",
+            "regime_reasons":      [],
         }
         sink = io.StringIO()
+
+        # VIX — 3-month history; compute 5-day velocity for panic detection
         try:
             with contextlib.redirect_stderr(sink):
                 vix_hist = yf.Ticker(VIX_TICKER).history(period="3mo")
             if vix_hist is not None and len(vix_hist) > 5:
                 result["vix"]      = float(vix_hist["Close"].iloc[-1])
                 result["vix_hist"] = vix_hist
+                if len(vix_hist) >= 6:
+                    result["vix_velocity"] = float(
+                        vix_hist["Close"].iloc[-1] - vix_hist["Close"].iloc[-6]
+                    )
         except Exception:
             pass
 
+        # 10Y Treasury yield
         try:
             with contextlib.redirect_stderr(sink):
                 tnx_hist = yf.Ticker(YIELD_10Y_TICKER).history(period="3mo")
             if tnx_hist is not None and len(tnx_hist) > 5:
                 result["yield_10y"]  = float(tnx_hist["Close"].iloc[-1])
                 result["yield_hist"] = tnx_hist
+        except Exception:
+            pass
+
+        # 3-month T-bill yield (^IRX) — yield curve inversion check
+        try:
+            with contextlib.redirect_stderr(sink):
+                irx_hist = yf.Ticker("^IRX").history(period="5d")
+            if irx_hist is not None and len(irx_hist) > 0:
+                result["yield_3m"] = float(irx_hist["Close"].iloc[-1])
+        except Exception:
+            pass
+
+        # HYG (iShares High Yield ETF) — credit stress proxy
+        try:
+            with contextlib.redirect_stderr(sink):
+                hyg_hist = yf.Ticker("HYG").history(period="2mo")
+            if hyg_hist is not None and len(hyg_hist) > 20:
+                hyg_1m_ret = float(
+                    hyg_hist["Close"].iloc[-1] / hyg_hist["Close"].iloc[-21] - 1
+                )
+                result["credit_stress"] = hyg_1m_ret < -0.03
+        except Exception:
+            pass
+
+        # SPY (1-year) — market drawdown from 52-week high
+        try:
+            with contextlib.redirect_stderr(sink):
+                spy_hist = yf.Ticker("SPY").history(period="1y")
+            if spy_hist is not None and len(spy_hist) > 20:
+                spy_high = float(spy_hist["Close"].max())
+                spy_now  = float(spy_hist["Close"].iloc[-1])
+                result["market_drawdown_pct"] = (spy_now / spy_high - 1) * 100
         except Exception:
             pass
 
@@ -422,18 +532,72 @@ class MacroFetcher:
                 pass
 
         result["regime"], result["regime_reasons"] = self._classify(result)
-        print(f"  Macro regime: {result['regime'].upper()}")
+        crash_n = result.get("crash_signals", 0)
+        print(f"  Macro regime: {result['regime'].upper()}", end="")
+        if crash_n > 0:
+            print(f"  |  Crash signals active: {crash_n}/5", end="")
+        print()
         print()
         return result
 
     def _classify(self, m: dict):
-        vix   = m.get("vix")
-        y10   = m.get("yield_10y")
-        y_hist = m.get("yield_hist")
-        reasons = []
-        regime  = "neutral"
+        vix          = m.get("vix")
+        vix_velocity = m.get("vix_velocity")
+        yield_10y    = m.get("yield_10y")
+        yield_3m     = m.get("yield_3m")
+        credit_stress= m.get("credit_stress", False)
+        drawdown_pct = m.get("market_drawdown_pct", 0.0)
+        y_hist       = m.get("yield_hist")
+        reasons      = []
+        regime       = "neutral"
 
-        # VIX-based
+        # ── Count crash signals (0–5) ──────────────────────────────────────────
+        crash_signals = 0
+        crash_reasons = []
+
+        # Signal 1: VIX velocity > 7 points in 5 days (real-time panic)
+        if vix_velocity is not None and vix_velocity > 7:
+            crash_signals += 1
+            crash_reasons.append(f"VIX velocity +{vix_velocity:.1f}pts/5d (panic spike)")
+
+        # Signal 2: HYG 1-month return < -3% (credit markets seizing)
+        if credit_stress:
+            crash_signals += 1
+            crash_reasons.append("HYG 1m return < -3% (credit stress)")
+
+        # Signal 3: Yield curve inverted (3M T-bill > 10Y Treasury)
+        if yield_3m is not None and yield_10y is not None and yield_3m > yield_10y:
+            crash_signals += 1
+            crash_reasons.append(
+                f"Yield curve inverted: 3M={yield_3m:.2f}% > 10Y={yield_10y:.2f}%"
+            )
+
+        # Signal 4: SPY more than 12% below 52-week high (bear territory)
+        if drawdown_pct < -12.0:
+            crash_signals += 1
+            crash_reasons.append(f"SPY {drawdown_pct:.1f}% off 52-week high (bear territory)")
+
+        # Signal 5: VIX absolute level > 35 (extreme fear)
+        if vix is not None and vix > 35:
+            crash_signals += 1
+            crash_reasons.append(f"VIX={vix:.1f} (extreme fear)")
+
+        m["crash_signals"] = crash_signals
+
+        # ── Regime classification (crash signals override legacy logic) ────────
+        if crash_signals >= 3:
+            regime = "crisis"
+            reasons.append(f"CRISIS DETECTED — {crash_signals}/5 crash signals active")
+            reasons.extend(crash_reasons)
+            return regime, reasons
+
+        if crash_signals == 2:
+            regime = "pre_crisis"
+            reasons.append(f"PRE-CRISIS — {crash_signals}/5 crash signals active")
+            reasons.extend(crash_reasons)
+            return regime, reasons
+
+        # Legacy VIX-based logic
         if vix is not None:
             if vix < 16:
                 reasons.append(f"VIX={vix:.1f} (low fear → risk-on)")
@@ -457,5 +621,9 @@ class MacroFetcher:
                 reasons.append(f"10Y yield ↓{dy:+.2f}% → falling rate env")
                 if regime in ("neutral",):
                     regime = "falling_rate"
+
+        # Surface any sub-threshold crash signals for transparency
+        if crash_reasons:
+            reasons.append(f"Crash signals ({crash_signals}/5): {'; '.join(crash_reasons)}")
 
         return regime, reasons
