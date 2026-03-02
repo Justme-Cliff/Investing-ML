@@ -168,6 +168,14 @@ def main():
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
+    # ── 5d. Tier 2 enrichment — options flow + Google Trends + Reddit ─────────
+    try:
+        from advisor.alternative_data import enrich_top_n
+        ranked_df = enrich_top_n(ranked_df, universe_data, macro_data, n=30)
+        print("  Enrichment complete — options flow + retail sentiment applied.\n")
+    except Exception as _e:
+        print(f"  Enrichment skipped ({_e}).\n")
+
     # ── 5c. Apply fresh-picks penalty (optional) ──────────────────────────────
     if profile.avoid_recent:
         recent_tickers = memory.get_recent_tickers(n_sessions=2)
@@ -238,6 +246,8 @@ def main():
         macro_data=macro_data,
         valuation_results=valuation_results,
         universe_data=universe_data,
+        risk_results=risk_results,
+        protocol_results=protocol_results,
     )
     memory.save()
 

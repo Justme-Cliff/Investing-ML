@@ -13,6 +13,7 @@ FINNHUB_KEY      = os.getenv("FINNHUB_KEY",      "")   # company news, insider t
 NEWSAPI_KEY      = os.getenv("NEWSAPI_KEY",      "")   # broad financial news search
 FRED_KEY         = os.getenv("FRED_KEY",         "")   # macro series: CPI, UNRATE, FEDFUNDS, T10Y2Y, etc.
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")   # earnings, income statement supplements
+FMP_KEY          = os.getenv("FMP_KEY",          "")   # Financial Modeling Prep: analyst revisions, ratings
 
 # ── Dynamic universe settings ─────────────────────────────────────────────────
 # When DYNAMIC_UNIVERSE = True the pipeline downloads ALL US-listed common
@@ -24,6 +25,21 @@ ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")   # earnings, income statem
 DYNAMIC_UNIVERSE        = True
 UNIVERSE_MIN_MARKET_CAP = 100_000_000   # $100 M — filters out micro-cap noise
 UNIVERSE_MAX_TICKERS    = 500           # stocks scored per run (~5–10 min)
+
+# ── Sector equity risk premiums (% — added to rf_rate for sector-specific WACC/DCF) ─
+SECTOR_ERP = {
+    "Technology":    6.0,
+    "Healthcare":    5.5,
+    "Financials":    5.5,
+    "Consumer":      5.0,
+    "Energy":        5.5,
+    "Industrials":   5.0,
+    "Utilities":     3.5,
+    "Real Estate":   4.0,
+    "Materials":     5.5,
+    "Communication": 5.5,
+    "Unknown":       5.5,
+}
 
 # ── Macro / benchmark tickers (all free via yfinance) ──────────────────────────
 SP500_TICKER    = "^GSPC"
@@ -259,6 +275,11 @@ POSITIVE_WORDS = {
     "exceed", "positive", "improve", "improvement", "dividend", "buyback",
     "innovation", "launch", "partner", "partnership", "win", "award", "boom",
     "robust", "accelerate", "momentum", "revenue", "milestone",
+    # Extended set
+    "raised guidance", "margin expansion", "record revenue", "beat estimates",
+    "record earnings", "accelerating", "exceeded", "rebound", "recovery",
+    "upside", "boost", "strengthens", "raised forecast", "consensus beat",
+    "market share gain",
 }
 
 NEGATIVE_WORDS = {
@@ -269,4 +290,9 @@ NEGATIVE_WORDS = {
     "penalty", "fine", "warning", "recall", "debt", "bankruptcy", "default",
     "volatile", "uncertainty", "headwind", "pressure", "slowdown", "recession",
     "withdraw", "delay", "disappointing", "challenging", "probe", "scrutiny",
+    # Extended set
+    "lowered guidance", "write-down", "restatement", "margin compression",
+    "guidance cut", "missed estimates", "impairment", "suspended",
+    "deteriorating", "revenue miss", "earnings miss", "negative outlook",
+    "credit risk", "debt burden", "cost inflation",
 }

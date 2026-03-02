@@ -25,6 +25,8 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+from config import SECTOR_ERP
+
 
 class RiskEngine:
     """Run all risk / quality metrics for the final top-10 stocks."""
@@ -37,12 +39,22 @@ class RiskEngine:
             data = universe_data.get(t)
             if not data:
                 continue
-            results[t] = self.analyze(t, data["info"], data["history"], rf_rate)
+            sector     = data.get("sector",     "Unknown")
+            nearest_iv = data.get("nearest_iv")
+            # Use enriched iv_rank if Tier 2 already computed it
+            iv_rank_pre = data.get("iv_rank")
+            results[t] = self.analyze(
+                t, data["info"], data["history"], rf_rate,
+                sector=sector, nearest_iv=nearest_iv, iv_rank_pre=iv_rank_pre,
+            )
         return results
 
     def analyze(self, ticker: str, info: dict,
-                history: pd.DataFrame, rf_rate: float = 0.045) -> dict:
-        close = history["Close"].dropna()
+                history: pd.DataFrame, rf_rate: float = 0.045,
+                sector: str = "Unknown", nearest_iv: Optional[float] = None,
+                iv_rank_pre: Optional[float] = None) -> dict:
+        close   = history["Close"].dropna()
+        iv_rank = iv_rank_pre if iv_rank_pre is not None else self._compute_iv_rank(close, nearest_iv)
         return {
             "ticker":            ticker,
             "altman_z":          self.altman_z(info),
@@ -50,11 +62,33 @@ class RiskEngine:
             "sortino":           self.sortino(close, rf_rate),
             "max_drawdown_pct":  self.max_drawdown(close),
             "var_95_pct":        self.var_95(close),
-            "roic_wacc":         self.roic_wacc_spread(info, rf_rate),
+            "roic_wacc":         self.roic_wacc_spread(info, rf_rate, sector),
             "accruals":          self.accruals_ratio(info),
             "gross_prof":        self.gross_profitability(info),
             "piotroski":         self.piotroski_9pt(info),
+            "iv_rank":           iv_rank,
         }
+
+    # ── IV rank proxy ─────────────────────────────────────────────────────────
+    def _compute_iv_rank(self, close: pd.Series,
+                         nearest_iv: Optional[float]) -> Optional[float]:
+        """
+        Estimate IV rank (0–1) using nearest_iv vs historical vol as proxy.
+        True IV rank requires 52w IV history which yfinance doesn't provide;
+        this approximates it using historical vol as the baseline.
+
+        > 0.70 = elevated fear (IV >> hist vol) → caution
+        < 0.30 = complacency (IV ≈ or < hist vol) → potentially good entry
+        """
+        if nearest_iv is None or len(close) < 63:
+            return None
+        hist_vol = float(close.pct_change().dropna().std()) * math.sqrt(252)
+        if hist_vol <= 0:
+            return None
+        # IV typically runs ~115% of hist vol for ATM options in normal markets
+        iv_ratio = nearest_iv / (hist_vol * 1.15)
+        iv_rank  = max(0.0, min(1.0, (iv_ratio - 0.5) * 1.25))
+        return round(iv_rank, 3)
 
     # ── Altman Z-Score (modified for non-manufacturing) ───────────────────────
     def altman_z(self, info: dict) -> dict:
@@ -141,20 +175,44 @@ class RiskEngine:
         return round(float(monthly.quantile(0.05)) * 100, 1)
 
     # ── Valuation quality metrics ─────────────────────────────────────────────
-    def roic_wacc_spread(self, info: dict, rf_rate: float = 0.045) -> dict:
+    def roic_wacc_spread(self, info: dict, rf_rate: float = 0.045,
+                         sector: str = "Unknown") -> dict:
         """
-        ROIC proxy = Return on Assets (available directly from yfinance)
-        WACC proxy = rf + beta × 5.5%  (CAPM)
-        Spread > 0 means the business creates shareholder value.
+        ROIC proxy = Return on Assets (yfinance)
+        WACC = full Modigliani-Miller formula:
+            cost_equity = rf + beta × sector_erp
+            cost_debt   = interest_expense / total_debt
+            WACC        = (E/V)×cost_equity + (D/V)×cost_debt×(1−tax_rate)
+        Falls back to CAPM if balance-sheet fields are missing.
+        Spread > 0 means the business is creating shareholder value.
         """
         roa  = info.get("returnOnAssets")
         beta = float(info.get("beta") or 1.0)
+        erp  = SECTOR_ERP.get(sector, 5.5) / 100
+
+        # Full WACC inputs
+        interest_exp = abs(float(info.get("interestExpense") or 0))
+        total_debt   = float(info.get("totalDebt")           or 0)
+        bvps         = float(info.get("bookValue")           or 0)
+        shares       = float(info.get("sharesOutstanding")   or 0)
+        tax_rate     = float(info.get("taxRateForCalcs")     or 0.21)
+
+        D = total_debt
+        E = bvps * shares
+        V = D + E
+
+        cost_equity = rf_rate + beta * erp
+        if V > 0 and total_debt > 0:
+            cost_debt = interest_exp / total_debt
+            wacc = (E / V * cost_equity + D / V * cost_debt * (1 - tax_rate)) * 100
+        else:
+            # CAPM fallback when debt structure is unknown
+            wacc = (rf_rate + beta * 0.055) * 100
 
         if roa is None:
-            return {"roic": None, "wacc": None, "spread": None, "verdict": "N/A"}
+            return {"roic": None, "wacc": round(wacc, 1), "spread": None, "verdict": "N/A"}
 
-        roic   = float(roa) * 100              # already a ratio, convert to %
-        wacc   = (rf_rate + beta * 0.055) * 100
+        roic   = float(roa) * 100
         spread = roic - wacc
 
         if spread > 15:

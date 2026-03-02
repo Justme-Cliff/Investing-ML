@@ -211,17 +211,38 @@ class SessionMemory:
         macro_data:        dict = None,
         valuation_results: dict = None,
         universe_data:     dict = None,
+        risk_results:      dict = None,
+        protocol_results:  list = None,   # list from ProtocolAnalyzer.analyze_all()
     ):
         """
         Save a completed analysis session.
-        Pass macro_data and valuation_results for richer future learning.
+        Stores full valuation, risk, and protocol data per pick for the history time-machine.
         """
         regime = (macro_data or {}).get("regime", "neutral")
 
+        # Macro snapshot for history time-machine view
+        macro_snapshot = {}
+        if macro_data:
+            macro_snapshot = {
+                "regime":        regime,
+                "vix":           macro_data.get("vix"),
+                "yield_10y":     macro_data.get("yield_10y"),
+                "crash_signals": macro_data.get("crash_signals", 0),
+            }
+
+        # Convert protocol list → dict keyed by ticker for easy lookup
+        proto_map: dict = {}
+        if protocol_results:
+            for p in protocol_results:
+                t = p.get("ticker")
+                if t:
+                    proto_map[t] = p
+
         session = {
-            "session_id":   str(uuid.uuid4())[:8],
-            "timestamp":    datetime.now(timezone.utc).isoformat(),
-            "macro_regime": regime,
+            "session_id":     str(uuid.uuid4())[:8],
+            "timestamp":      datetime.now(timezone.utc).isoformat(),
+            "macro_regime":   regime,
+            "macro_snapshot": macro_snapshot,
             "profile": {
                 "risk_level":   profile.risk_level,
                 "time_horizon": profile.time_horizon,
@@ -249,8 +270,49 @@ class SessionMemory:
                 name = col.replace("_score", "")
                 pick["factors"][name] = float(row.get(col, 50.0))
 
+            # Valuation signal (backward-compat) + full snapshot for time-machine
             if valuation_results and ticker in valuation_results:
-                pick["valuation_signal"] = valuation_results[ticker].get("signal")
+                v = valuation_results[ticker]
+                pick["valuation_signal"] = v.get("signal")
+                pick["valuation"] = {
+                    "fair_value":  v.get("fair_value"),
+                    "entry_low":   v.get("entry_low"),
+                    "entry_high":  v.get("entry_high"),
+                    "target":      v.get("target"),
+                    "stop_loss":   v.get("stop_loss"),
+                    "signal":      v.get("signal"),
+                    "upside_pct":  v.get("upside_pct"),
+                    "rr_ratio":    v.get("rr_ratio"),
+                    "premium_pct": v.get("premium_pct"),
+                    "estimates":   v.get("estimates", {}),
+                    "sensitivity": v.get("sensitivity", {}),
+                }
+
+            # Full risk snapshot for time-machine
+            if risk_results and ticker in risk_results:
+                r = risk_results[ticker]
+                pick["risk"] = {
+                    "altman_z":         r.get("altman_z", {}),
+                    "sharpe":           r.get("sharpe"),
+                    "sortino":          r.get("sortino"),
+                    "max_drawdown_pct": r.get("max_drawdown_pct"),
+                    "var_95_pct":       r.get("var_95_pct"),
+                    "roic_wacc":        r.get("roic_wacc", {}),
+                    "piotroski":        r.get("piotroski", {}),
+                }
+
+            # Full protocol snapshot for time-machine
+            if ticker in proto_map:
+                pr = proto_map[ticker]
+                pick["protocol"] = {
+                    "gates":         pr.get("gates", []),
+                    "gate_statuses": pr.get("gate_statuses", []),
+                    "pass_count":    pr.get("pass_count", 0),
+                    "warn_count":    pr.get("warn_count", 0),
+                    "fail_count":    pr.get("fail_count", 0),
+                    "overall_score": pr.get("overall_score"),
+                    "conviction":    pr.get("conviction"),
+                }
 
             session["picks"].append(pick)
 

@@ -142,6 +142,22 @@ class MultiFactorScorer:
                 0.45 * (r6m or 0.0)
             )
 
+        # Short interest nudge: >15% short float signals squeeze potential or
+        # crowded short confirming weakness depending on momentum direction
+        short_pct = float(info.get("shortPercentOfFloat") or 0)
+        if short_pct > 0.15:
+            if momentum_raw > 0:
+                momentum_raw += 0.05   # squeeze fuel
+            else:
+                momentum_raw -= 0.05   # short interest confirming weakness
+
+        # Relative sector strength: outperformance vs sector ETF → momentum boost
+        sector_etf_perf = self.macro_data.get("sector_etf", {})
+        sector_etf_3m   = sector_etf_perf.get(sector)
+        if sector_etf_3m is not None and r3m is not None:
+            relative      = r3m - sector_etf_3m / 100.0
+            momentum_raw += max(-0.08, min(0.08, relative * 0.20))
+
         # ── 2. Volatility (inverted: low vol = high score) ────────────────────
         daily_ret    = close.pct_change().dropna()
         vol          = float(daily_ret.std()) * math.sqrt(252)
@@ -211,24 +227,58 @@ class MultiFactorScorer:
             gp_ratio     = min(float(gm) * float(rev) / float(ta), 2.0)
             quality_raw  = quality_raw * 0.80 + gp_ratio * 0.10
 
+        # ── Source 1a: Revenue trend (QoQ acceleration) ───────────────────────
+        revenue_trend = data.get("revenue_trend")
+        if revenue_trend is not None:
+            rv = float(revenue_trend)
+            # +10% QoQ → strong; -10% → penalty. Max ±0.10 on quality, ±0.04 on momentum
+            rev_adj = max(-0.10, min(0.10, rv * 0.60))
+            quality_raw  += rev_adj * 0.50
+            momentum_raw += max(-0.04, min(0.04, rv * 0.18))
+
+        # ── Source 1b: EPS beat rate (earnings momentum) ───────────────────────
+        earnings_beat_rate = data.get("earnings_beat_rate")
+        if earnings_beat_rate is not None:
+            br = float(earnings_beat_rate)
+            # 75%+ beat rate → consistent outperformer; <25% → recurring disappointments
+            beat_adj = (br - 0.50) * 0.20   # range: −0.10 to +0.10
+            quality_raw  += beat_adj * 0.60
+            momentum_raw += beat_adj * 0.40
+
+        # ── Source 1c: Institutional ownership (smart-money validation) ───────
+        institutional_pct = data.get("institutional_pct")
+        if institutional_pct is not None:
+            ip = float(institutional_pct)
+            # >70% = heavily validated; <20% = underfollowed. Range: −0.05 to +0.06
+            inst_adj = max(-0.05, min(0.06, (ip - 0.45) * 0.12))
+            quality_raw += inst_adj
+
         # ── 5. Technical (pre-computed with Bollinger + OBV) ──────────────────
         technical_raw = data.get("technical", 50.0) / 100
 
-        # ── 6. Sentiment (pre-computed) ───────────────────────────────────────
-        sentiment_raw = data.get("sentiment", 50.0) / 100
+        # ── 6. Sentiment — 3-source composite (news + insider + analyst) ────────
+        news_score    = float(data.get("sentiment",     50.0))
+        insider_score = float(data.get("insider_score", 50.0))
 
-        # Analyst recommendation nudge
-        rec = (info.get("recommendationKey") or "").lower()
-        rec_adj = {"strong_buy": 0.15, "buy": 0.10, "hold": 0.02,
-                   "sell": -0.15, "strong_sell": -0.25}.get(rec, 0)
-        sentiment_raw = max(0.0, min(1.0, sentiment_raw + rec_adj))
+        # Analyst score: rec key (40%) + target upside (40%) + coverage breadth (20%)
+        rec_map = {"strong_buy": 90, "buy": 75, "hold": 50, "sell": 25, "strong_sell": 10}
+        rec       = (info.get("recommendationKey") or "").lower()
+        rec_score = rec_map.get(rec, 50)
+        cur_p     = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+        tgt_p     = float(info.get("targetMeanPrice") or 0)
+        upside_sc = float(max(0, min(100, 50 + (tgt_p - cur_p) / max(cur_p, 1) * 200))) if cur_p and tgt_p else 50.0
+        n_ana     = float(info.get("numberOfAnalystOpinions") or 0)
+        cov_sc    = float(max(10, min(100, n_ana / 20 * 100)))
+        analyst_score = 0.40 * rec_score + 0.40 * upside_sc + 0.20 * cov_sc
 
-        # Insider trading signal (Finnhub): net buy pressure boosts sentiment
-        # +1 = all insiders buying  |  -1 = all insiders selling
-        insider_signal = data.get("insider_signal", 0.0) or 0.0
-        if insider_signal != 0.0:
-            insider_adj   = insider_signal * 0.12          # max ±0.12 nudge
-            sentiment_raw = max(0.0, min(1.0, sentiment_raw + insider_adj))
+        # Tier 1 weighted composite (0–1): news 45%, insider 35%, analyst 20%
+        sentiment_raw = (
+            0.45 * news_score +
+            0.35 * insider_score +
+            0.20 * analyst_score
+        ) / 100
+
+        sentiment_raw = max(0.0, min(1.0, sentiment_raw))
 
         # Earnings surprise signal (Finnhub): recent positive surprises → momentum boost
         eps_surprise = data.get("earnings_surprise_avg")

@@ -20,6 +20,8 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from config import SECTOR_ERP
+
 # Typical sector EV/EBITDA medians (updated periodically)
 SECTOR_EV_EBITDA = {
     "Technology":  22,
@@ -53,7 +55,24 @@ class ValuationEngine:
 
     def __init__(self, rf_rate: float = 0.045):
         self.rf_rate       = rf_rate
-        self.discount_rate = rf_rate + 0.055   # rf + 5.5% equity risk premium (~10%)
+        self.discount_rate = rf_rate + 0.055   # fallback; _get_discount_rate() is sector-aware
+
+    # ── Dynamic discount rate (sector ERP + size premium) ─────────────────────
+    def _get_discount_rate(self, info: dict, sector: str) -> float:
+        """
+        rf_rate + sector_erp + size_premium
+
+        Size premium: marketCap > $10B = 0%  |  $2–10B = +1%  |  < $2B = +2%
+        """
+        erp      = SECTOR_ERP.get(sector, 5.5) / 100
+        mktcap   = float(info.get("marketCap") or 0)
+        if mktcap > 10e9:
+            size_prem = 0.0
+        elif mktcap > 2e9:
+            size_prem = 0.01
+        else:
+            size_prem = 0.02
+        return self.rf_rate + erp + size_prem
 
     def analyze_all(self, top10, universe_data: dict) -> Dict[str, dict]:
         """Return valuation dict keyed by ticker for all stocks in top10."""
@@ -75,7 +94,7 @@ class ValuationEngine:
 
         estimates: Dict[str, float] = {}
 
-        dcf = self._dcf(info)
+        dcf = self._dcf(info, sector)
         if dcf and dcf > 0:
             estimates["dcf"] = dcf
 
@@ -150,15 +169,18 @@ class ValuationEngine:
             "rr_ratio":        rr_ratio,
             "signal":          signal,
             "methods_count":   len(estimates),
-            "sensitivity":     self.dcf_sensitivity(info),
+            "sensitivity":     self.dcf_sensitivity(info, sector),
         }
 
     # ── Method 1: 2-Stage DCF ─────────────────────────────────────────────────
-    def _dcf(self, info: dict) -> Optional[float]:
+    def _dcf(self, info: dict, sector: str = "Unknown") -> Optional[float]:
         """
         2-stage discounted cash flow on free cash flow per share.
         Stage 1: 5 years at estimated growth rate
         Stage 2: perpetuity at terminal growth rate
+
+        Uses dynamic discount rate (sector ERP + size premium) and accruals
+        quality adjustment on growth rate.
         """
         fcf    = info.get("freeCashflow")
         shares = info.get("sharesOutstanding")
@@ -175,9 +197,21 @@ class ValuationEngine:
         earn_g = float(info.get("earningsGrowth") or 0)
         g      = min(0.25, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
 
+        # Growth quality adjustment: clean cash earnings → +8%; accounting > cash → −8%
+        ni  = info.get("netIncomeToCommon") or info.get("netIncome")
+        ocf = info.get("operatingCashflow")
+        ta  = info.get("totalAssets")
+        if ni and ocf and ta and float(ta) > 0:
+            accruals = (float(ni) - float(ocf)) / float(ta)
+            if accruals < -0.05:
+                g *= 1.08    # high-quality cash earnings → reward growth
+            elif accruals > 0.05:
+                g *= 0.92    # accounting earnings >> cash → haircut growth
+            g = min(0.25, max(-0.03, g))
+
         # Terminal growth: conservative — min(3%, g × 0.30)
         tg = min(0.03, max(0.01, g * 0.30))
-        dr = self.discount_rate
+        dr = self._get_discount_rate(info, sector)
 
         # Stage 1: 5 years
         pv, cf = 0.0, fcf_ps
@@ -246,8 +280,9 @@ class ValuationEngine:
     # ── Method 4: FCF Yield target ────────────────────────────────────────────
     def _fcf_yield_target(self, info: dict) -> Optional[float]:
         """
-        Price at which FCF yield = 4.5% (= 22.2× FCF per share).
-        A 4.5% FCF yield is roughly fair for quality large-cap companies.
+        Price at which FCF yield = rf_rate + 3.0% (dynamic).
+        At rf=4.5% → 7.5% FCF yield target (vs old hard-coded 4.5%).
+        Adjusts automatically with the rate environment.
         """
         fcf    = info.get("freeCashflow")
         shares = info.get("sharesOutstanding")
@@ -256,17 +291,19 @@ class ValuationEngine:
         fcf, shares = float(fcf), float(shares)
         if fcf <= 0 or shares <= 0:
             return None
-        fcf_ps = fcf / shares
-        return round(fcf_ps / 0.045, 2)    # price at 4.5% FCF yield
+        fcf_ps       = fcf / shares
+        target_yield = self.rf_rate + 0.030   # dynamic: rises with rf_rate
+        return round(fcf_ps / target_yield, 2)
 
     # ── DCF Sensitivity (Bear / Base / Bull) ──────────────────────────────────
-    def dcf_sensitivity(self, info: dict) -> dict:
+    def dcf_sensitivity(self, info: dict, sector: str = "Unknown") -> dict:
         """
         Run DCF under three growth scenarios.
           Bear = base growth × 0.50
           Base = blended revenue + earnings growth (same as _dcf)
           Bull = base growth × 1.50  (capped at 30%)
         Returns: {"Bear": {fair_value, growth_rate, signal, premium_pct}, ...}
+        Uses the same dynamic discount rate as _dcf().
         """
         fcf    = info.get("freeCashflow")
         shares = info.get("sharesOutstanding")
@@ -281,6 +318,7 @@ class ValuationEngine:
         earn_g = float(info.get("earningsGrowth") or 0)
         base_g = min(0.25, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
         cur    = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
+        dr     = self._get_discount_rate(info, sector)
 
         scenarios = {
             "Bear": max(-0.03, base_g * 0.50),
@@ -290,19 +328,19 @@ class ValuationEngine:
 
         results = {}
         for name, g in scenarios.items():
-            tg = min(0.03, max(0.01, g * 0.30))
-            dr = self.discount_rate
+            tg    = min(0.03, max(0.01, g * 0.30))
+            dr_sc = dr   # fresh copy per scenario (safety for dr <= tg)
 
             pv, cf = 0.0, fcf_ps
             for yr in range(1, 6):
                 cf  = cf * (1 + g)
-                pv += cf / (1 + dr) ** yr
+                pv += cf / (1 + dr_sc) ** yr
 
             tv_cf = cf * (1 + tg)
-            if dr <= tg:
-                dr = tg + 0.05
-            tv    = tv_cf / (dr - tg)
-            fv    = pv + tv / (1 + dr) ** 5
+            if dr_sc <= tg:
+                dr_sc = tg + 0.05
+            tv = tv_cf / (dr_sc - tg)
+            fv = pv + tv / (1 + dr_sc) ** 5
 
             # Sanity check — same as _dcf
             if fv <= 0 or (cur and (fv > cur * 50 or fv < 0.50)):

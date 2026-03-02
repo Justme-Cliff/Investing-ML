@@ -25,8 +25,54 @@ from config import FINNHUB_KEY, NEWSAPI_KEY, POSITIVE_WORDS, NEGATIVE_WORDS
 
 
 # ── RSS feed templates ─────────────────────────────────────────────────────────
-_YF_RSS   = "https://finance.yahoo.com/rss/headline?s={ticker}&region=US&lang=en-US"
-_REUTERS  = "https://feeds.reuters.com/reuters/businessNews"
+_YF_RSS        = "https://finance.yahoo.com/rss/headline?s={ticker}&region=US&lang=en-US"
+_REUTERS       = "https://feeds.reuters.com/reuters/businessNews"
+_AP_BUSINESS   = "https://feeds.apnews.com/apnews/business"
+_MARKETWATCH   = "https://feeds.marketwatch.com/marketwatch/topstories"
+_BENZINGA      = "https://www.benzinga.com/feed"
+
+# Phrases that negate the keyword appearing immediately after
+_NEGATION_PHRASES = (
+    "not ", "no ", "never ", "fails to", "unable to", "failed to",
+    "didn't ", "doesn't ", "won't ", "cannot ", "can't ", "no longer",
+)
+
+# Clause boundaries that reset negation scope (negation can't cross these)
+_CLAUSE_BOUNDARIES = (",", ";", " but ", " and ", " however ", " yet ", " while ")
+
+
+def _is_negated(text_before: str) -> bool:
+    """
+    Return True if a negation phrase appears in the 50 chars before a keyword
+    AND no clause boundary (comma, 'and', 'but', etc.) separates the negation
+    from the keyword.  This prevents 'not X and Y' from negating Y.
+    """
+    snippet = text_before[-50:].lower() if len(text_before) > 50 else text_before.lower()
+    for neg in _NEGATION_PHRASES:
+        idx = snippet.rfind(neg)     # last occurrence in window
+        if idx >= 0:
+            after_neg = snippet[idx + len(neg):]
+            if not any(b in after_neg for b in _CLAUSE_BOUNDARIES):
+                return True
+    return False
+
+
+def _score_headline(title: str) -> float:
+    """
+    Score a single headline with negation detection.
+    Returns a raw score (positive = bullish, negative = bearish).
+    """
+    t = title.lower()
+    score = 0.0
+    for kw in POSITIVE_WORDS:
+        if kw in t:
+            idx = t.find(kw)
+            score += -1.0 if _is_negated(t[:idx]) else 1.0
+    for kw in NEGATIVE_WORDS:
+        if kw in t:
+            idx = t.find(kw)
+            score += 1.0 if _is_negated(t[:idx]) else -1.0
+    return score
 
 
 class NewsFetcher:
@@ -61,6 +107,9 @@ class NewsFetcher:
 
         _add(self._yf_news(ticker))
         _add(self._rss_news(ticker))
+        _add(self._ap_news(ticker))
+        _add(self._marketwatch_news(ticker))
+        _add(self._benzinga_news(ticker))
         if self._fh_key:
             _add(self._finnhub_news(ticker))
         if self._na_key and len(articles) < n:
@@ -97,16 +146,27 @@ class NewsFetcher:
         return articles[:n]
 
     def score_sentiment(self, headlines: List[str]) -> float:
-        """Score a list of headlines 0–100 using keyword matching."""
+        """
+        Score a list of headlines 0–100.
+        Uses negation detection and recency weighting (articles are assumed newest-first).
+        Up to 20 articles scored; recent ones weighted 1.5× (≤3d) or 1.2× (≤7d).
+        """
         if not headlines:
             return 50.0
-        pos = neg = 0
-        for h in headlines:
-            hl = h.lower()
-            pos += sum(1 for w in POSITIVE_WORDS if w in hl)
-            neg += sum(1 for w in NEGATIVE_WORDS if w in hl)
-        total = max(pos + neg, 1)
-        return round(min(100.0, max(0.0, 30.0 + (pos / total) * 70.0)), 1)
+        today = datetime.date.today()
+        total_score  = 0.0
+        total_weight = 0.0
+        for i, h in enumerate(headlines[:20]):
+            # Approximate recency: first items in list are newest
+            # Index-based weight: 0-2 → 1.5×, 3-6 → 1.2×, older → 1.0×
+            weight = 1.5 if i < 3 else (1.2 if i < 7 else 1.0)
+            total_score  += _score_headline(h) * weight
+            total_weight += weight
+        if total_weight == 0:
+            return 50.0
+        raw = total_score / total_weight      # typically in [-3, +3]
+        normalised = (raw + 3) / 6 * 100
+        return round(min(100.0, max(0.0, normalised)), 1)
 
     # ── Sources ────────────────────────────────────────────────────────────────
 
@@ -215,15 +275,76 @@ class NewsFetcher:
         except Exception:
             return []
 
+    def _ap_news(self, ticker: str) -> List[Dict]:
+        """AP Business RSS — filter entries that mention the ticker."""
+        try:
+            import feedparser
+            feed = feedparser.parse(_AP_BUSINESS)
+            out  = []
+            for entry in feed.entries[:30]:
+                title = getattr(entry, "title", "")
+                if not title or ticker.upper() not in title.upper():
+                    continue
+                out.append({
+                    "title":     title,
+                    "source":    "AP Business",
+                    "url":       getattr(entry, "link", ""),
+                    "published": getattr(entry, "published", ""),
+                    "summary":   getattr(entry, "summary", "")[:200],
+                })
+            return out
+        except Exception:
+            return []
+
+    def _marketwatch_news(self, ticker: str) -> List[Dict]:
+        """MarketWatch top-stories RSS — filter entries that mention the ticker."""
+        try:
+            import feedparser
+            feed = feedparser.parse(_MARKETWATCH)
+            out  = []
+            for entry in feed.entries[:30]:
+                title = getattr(entry, "title", "")
+                if not title or ticker.upper() not in title.upper():
+                    continue
+                out.append({
+                    "title":     title,
+                    "source":    "MarketWatch",
+                    "url":       getattr(entry, "link", ""),
+                    "published": getattr(entry, "published", ""),
+                    "summary":   getattr(entry, "summary", "")[:200],
+                })
+            return out
+        except Exception:
+            return []
+
+    def _benzinga_news(self, ticker: str) -> List[Dict]:
+        """Benzinga RSS — filter entries that mention the ticker."""
+        try:
+            import feedparser
+            feed = feedparser.parse(_BENZINGA)
+            out  = []
+            for entry in feed.entries[:30]:
+                title = getattr(entry, "title", "")
+                if not title or ticker.upper() not in title.upper():
+                    continue
+                out.append({
+                    "title":     title,
+                    "source":    "Benzinga",
+                    "url":       getattr(entry, "link", ""),
+                    "published": getattr(entry, "published", ""),
+                    "summary":   getattr(entry, "summary", "")[:200],
+                })
+            return out
+        except Exception:
+            return []
+
     # ── Helpers ────────────────────────────────────────────────────────────────
 
     def _classify(self, title: str) -> str:
-        """Quick 3-way sentiment classification for a single headline."""
-        hl  = title.lower()
-        pos = sum(1 for w in POSITIVE_WORDS if w in hl)
-        neg = sum(1 for w in NEGATIVE_WORDS if w in hl)
-        if pos > neg:   return "positive"
-        if neg > pos:   return "negative"
+        """Quick 3-way sentiment classification for a single headline (negation-aware)."""
+        score = _score_headline(title)
+        if score > 0:   return "positive"
+        if score < 0:   return "negative"
         return "neutral"
 
 

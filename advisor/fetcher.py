@@ -18,8 +18,31 @@ from config import (
     SP500_TICKER, VIX_TICKER, YIELD_10Y_TICKER,
     SECTOR_ETFS, STOCK_UNIVERSE, MACRO_TILTS,
     POSITIVE_WORDS, NEGATIVE_WORDS,
-    FINNHUB_KEY, ALPHAVANTAGE_KEY,
+    FINNHUB_KEY, ALPHAVANTAGE_KEY, FRED_KEY,
 )
+
+# ── SEC EDGAR CIK map (downloaded once per session, cached module-level) ──────
+_SEC_CIK_MAP: dict = {}   # ticker → CIK string
+
+def _load_sec_cik_map() -> dict:
+    """Download & cache the SEC company_tickers.json (all US listed companies)."""
+    global _SEC_CIK_MAP
+    if _SEC_CIK_MAP:
+        return _SEC_CIK_MAP
+    try:
+        r = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": "StockAdvisor contact@stockadvisor.local"},
+            timeout=10,
+        )
+        if r.status_code == 200:
+            _SEC_CIK_MAP = {
+                v["ticker"].upper(): str(v["cik_str"])
+                for v in r.json().values()
+            }
+    except Exception:
+        pass
+    return _SEC_CIK_MAP
 
 warnings.filterwarnings("ignore")
 
@@ -201,22 +224,72 @@ def _piotroski(info: dict) -> float:
     return (score / 8) * 100
 
 
+# Phrases that negate the keyword appearing immediately after (checked in 40-char window)
+_NEGATION_PHRASES = (
+    "not ", "no ", "never ", "fails to", "unable to", "failed to",
+    "didn't ", "doesn't ", "won't ", "cannot ", "can't ", "no longer",
+)
+
+
+_CLAUSE_BOUNDARIES = (",", ";", " but ", " and ", " however ", " yet ", " while ")
+
+
+def _is_negated(text_before: str) -> bool:
+    """
+    Return True if a negation phrase appears in the 50 chars before a keyword
+    AND no clause boundary separates the negation from the keyword.
+    """
+    snippet = text_before[-50:].lower() if len(text_before) > 50 else text_before.lower()
+    for neg in _NEGATION_PHRASES:
+        idx = snippet.rfind(neg)
+        if idx >= 0:
+            after_neg = snippet[idx + len(neg):]
+            if not any(b in after_neg for b in _CLAUSE_BOUNDARIES):
+                return True
+    return False
+
+
+def _score_headline(title: str) -> float:
+    """Score a single headline with negation detection."""
+    t     = title.lower()
+    score = 0.0
+    for kw in POSITIVE_WORDS:
+        if kw in t:
+            idx    = t.find(kw)
+            score += -1.0 if _is_negated(t[:idx]) else 1.0
+    for kw in NEGATIVE_WORDS:
+        if kw in t:
+            idx    = t.find(kw)
+            score += 1.0 if _is_negated(t[:idx]) else -1.0
+    return score
+
+
 def _sentiment(news: list) -> float:
-    """Score news headlines → 0–100 (50 = neutral)."""
+    """
+    Score news headlines → 0–100 (50 = neutral).
+    Negation-aware, recency-weighted, up to 20 articles.
+    """
     if not news:
         return 50.0
-    total = 0
-    count = 0
-    for item in news[:7]:
+    today        = datetime.date.today()
+    total        = 0.0
+    total_weight = 0.0
+    for item in news[:20]:
         title = (item.get("title") or "").lower()
-        pos = sum(1 for w in POSITIVE_WORDS if w in title)
-        neg = sum(1 for w in NEGATIVE_WORDS if w in title)
-        total += (pos - neg)
-        count += 1
-    if count == 0:
+        if not title:
+            continue
+        ts = item.get("providerPublishTime", 0)
+        try:
+            days_old = (today - datetime.date.fromtimestamp(float(ts or 0))).days if ts else 8
+            weight   = 1.5 if days_old < 3 else (1.2 if days_old < 7 else 1.0)
+        except Exception:
+            weight = 1.0
+        total        += _score_headline(title) * weight
+        total_weight += weight
+    if total_weight == 0:
         return 50.0
-    raw = total / count                        # typically in [-3, +3]
-    normalised = (raw + 3) / 6 * 100          # map to 0–100
+    raw       = total / total_weight          # typically in [-3, +3]
+    normalised = (raw + 3) / 6 * 100
     return float(max(0.0, min(100.0, normalised)))
 
 
@@ -285,6 +358,32 @@ class DataFetcher:
                     history = t.history(period=self.yf_period)
                     news    = t.news or []
 
+                # ── Source 2: Stooq CSV fallback when yfinance history is thin ─
+                if history is None or len(history) < 63:
+                    try:
+                        stooq_url = (
+                            f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
+                        )
+                        r = requests.get(
+                            stooq_url, timeout=10,
+                            headers={"User-Agent": "Mozilla/5.0"},
+                        )
+                        if r.status_code == 200 and r.text.strip():
+                            from io import StringIO as _SIO
+                            stooq_df = pd.read_csv(_SIO(r.text))
+                            if "Date" in stooq_df.columns and len(stooq_df) > 63:
+                                stooq_df.columns = [
+                                    c.strip().capitalize() for c in stooq_df.columns
+                                ]
+                                stooq_df["Date"] = pd.to_datetime(
+                                    stooq_df["Date"], errors="coerce"
+                                )
+                                stooq_df = stooq_df.dropna(subset=["Date"])
+                                stooq_df = stooq_df.set_index("Date").sort_index()
+                                history = stooq_df
+                    except Exception:
+                        pass
+
                 if history is None or len(history) < 63:
                     return None
 
@@ -327,6 +426,123 @@ class DataFetcher:
                 except Exception:
                     pass
 
+                # ── Insider score (yfinance insider_transactions, last 90d) ───
+                insider_score = 50.0
+                try:
+                    ins = t.insider_transactions
+                    if ins is not None and len(ins) > 0:
+                        cutoff = datetime.date.today() - datetime.timedelta(days=90)
+                        buys   = 0.0
+                        sells  = 0.0
+                        for _, row in ins.iterrows():
+                            try:
+                                raw_d = None
+                                for col in ("Start Date", "Date", "startDate"):
+                                    raw_d = row.get(col)
+                                    if raw_d is not None:
+                                        break
+                                if raw_d is None:
+                                    raw_d = row.name
+                                if hasattr(raw_d, "date"):
+                                    txn_date = raw_d.date()
+                                else:
+                                    txn_date = datetime.date.fromisoformat(str(raw_d)[:10])
+                                if txn_date < cutoff:
+                                    continue
+                                shares = abs(float(row.get("Shares", 0) or 0))
+                                txn    = str(row.get("Transaction", "") or "").lower()
+                                if "buy" in txn or "purchase" in txn:
+                                    buys  += shares
+                                elif "sale" in txn or "sell" in txn:
+                                    sells += shares
+                            except Exception:
+                                pass
+                        total = buys + sells
+                        if total > 0:
+                            net_signal   = (buys - sells) / total   # -1 to +1
+                            insider_score = float(max(0.0, min(100.0, 50.0 + net_signal * 50.0)))
+                except Exception:
+                    pass
+
+                # ── Short percent of float ────────────────────────────────────
+                short_percent = float(info.get("shortPercentOfFloat") or 0)
+
+                # ── Nearest-term implied volatility (options chain) ───────────
+                nearest_iv = None
+                try:
+                    expiries = t.options
+                    if expiries:
+                        chain   = t.option_chain(expiries[0])
+                        c_iv    = chain.calls["impliedVolatility"].dropna()
+                        p_iv    = chain.puts["impliedVolatility"].dropna()
+                        c_med   = float(c_iv.median()) if len(c_iv) > 0 else 0.0
+                        p_med   = float(p_iv.median()) if len(p_iv) > 0 else 0.0
+                        if c_med > 0 or p_med > 0:
+                            n = (1 if c_med > 0 else 0) + (1 if p_med > 0 else 0)
+                            nearest_iv = round((c_med + p_med) / n, 4)
+                except Exception:
+                    pass
+
+                # ── Source 1a: yfinance quarterly_financials → revenue trend (QoQ) ──
+                revenue_trend = None
+                try:
+                    qfin = t.quarterly_financials
+                    if qfin is not None and not qfin.empty:
+                        for rev_label in ("Total Revenue", "Revenue"):
+                            if rev_label in qfin.index:
+                                rev_series = qfin.loc[rev_label].dropna()
+                                if len(rev_series) >= 2:
+                                    r_new = float(rev_series.iloc[0])
+                                    r_old = float(rev_series.iloc[1])
+                                    if abs(r_old) > 0:
+                                        revenue_trend = (r_new - r_old) / abs(r_old)
+                                break
+                except Exception:
+                    pass
+
+                # ── Source 1b: yfinance earnings_history → EPS beat rate ──────
+                earnings_beat_rate = None
+                try:
+                    eh = t.earnings_history
+                    if eh is not None and not eh.empty:
+                        beats = 0
+                        total_q = 0
+                        for _, row in eh.head(8).iterrows():
+                            act = est = None
+                            for c in ("epsActual", "EPS Actual", "Reported EPS"):
+                                if c in row.index and pd.notna(row.get(c)):
+                                    act = row[c]; break
+                            for c in ("epsEstimate", "EPS Estimate", "EPS Estimated"):
+                                if c in row.index and pd.notna(row.get(c)):
+                                    est = row[c]; break
+                            if act is not None and est is not None:
+                                try:
+                                    a, e = float(act), float(est)
+                                    if abs(e) > 0.001:
+                                        total_q += 1
+                                        if a > e:
+                                            beats += 1
+                                except Exception:
+                                    pass
+                        if total_q > 0:
+                            earnings_beat_rate = beats / total_q
+                except Exception:
+                    pass
+
+                # ── Source 1c: yfinance major_holders → institutional ownership % ──
+                institutional_pct = None
+                try:
+                    mh = t.major_holders
+                    if mh is not None and not mh.empty and len(mh) > 1:
+                        # Row 1 is typically "% of Float Held by Institutions"
+                        raw_val = str(mh.iloc[1, 0]).replace("%", "").strip()
+                        ip = float(raw_val)
+                        if ip > 1.0:   # yfinance returns e.g. 65.4 (%)
+                            ip = ip / 100.0
+                        institutional_pct = max(0.0, min(1.0, ip))
+                except Exception:
+                    pass
+
                 # ── Finnhub supplemental signals (optional, non-blocking) ──────
                 finnhub = self._fetch_finnhub_signals(ticker)
 
@@ -340,8 +556,15 @@ class DataFetcher:
                     "news_titles":           news_titles,
                     "earnings_date":         earnings_date,
                     "earnings_days_away":    earnings_days_away,
+                    "insider_score":         insider_score,
+                    "short_percent":         short_percent,
+                    "nearest_iv":            nearest_iv,
                     "insider_signal":        finnhub.get("insider_signal",        0.0),
                     "earnings_surprise_avg": finnhub.get("earnings_surprise_avg", None),
+                    # Source 1: yfinance extended
+                    "revenue_trend":         revenue_trend,       # QoQ revenue growth
+                    "earnings_beat_rate":    earnings_beat_rate,  # fraction of quarters beating EPS
+                    "institutional_pct":     institutional_pct,   # % float held by institutions
                 }
             except Exception:
                 if attempt < 2:
@@ -531,6 +754,10 @@ class MacroFetcher:
             except Exception:
                 pass
 
+        # ── Source 3: FRED extended macro (recession prob, HY spread, sentiment) ─
+        fred_extra = self._fetch_fred_extended()
+        result.update(fred_extra)
+
         result["regime"], result["regime_reasons"] = self._classify(result)
         crash_n = result.get("crash_signals", 0)
         print(f"  Macro regime: {result['regime'].upper()}", end="")
@@ -539,6 +766,45 @@ class MacroFetcher:
         print()
         print()
         return result
+
+    def _fetch_fred_extended(self) -> dict:
+        """
+        Source 3: Fetch extended FRED macro series if FRED_KEY is set.
+        Adds: recession_prob, hy_spread, consumer_sentiment, yield_10_2_spread.
+        These improve regime classification accuracy significantly.
+        """
+        if not FRED_KEY:
+            return {}
+        out   = {}
+        base  = "https://api.stlouisfed.org/fred/series/observations"
+        series = {
+            "recession_prob":       "RECPROUSM156N",  # % probability of recession (0-100)
+            "hy_spread":            "BAMLH0A0HYM2",   # HY OAS spread (%) — credit stress
+            "consumer_sentiment":   "UMCSENT",         # Univ of Michigan index
+            "yield_10_2_spread":    "T10Y2Y",          # 10Y minus 2Y (negative = inverted)
+        }
+        for key, series_id in series.items():
+            try:
+                r = requests.get(
+                    base,
+                    params={
+                        "series_id":  series_id,
+                        "api_key":    FRED_KEY,
+                        "file_type":  "json",
+                        "sort_order": "desc",
+                        "limit":      3,
+                    },
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    for obs in r.json().get("observations", []):
+                        val = obs.get("value", ".")
+                        if val != ".":
+                            out[key] = float(val)
+                            break
+            except Exception:
+                pass
+        return out
 
     def _classify(self, m: dict):
         vix          = m.get("vix")
@@ -551,7 +817,13 @@ class MacroFetcher:
         reasons      = []
         regime       = "neutral"
 
-        # ── Count crash signals (0–5) ──────────────────────────────────────────
+        # Pull FRED-enhanced fields (may be None if no FRED key)
+        recession_prob     = m.get("recession_prob")
+        hy_spread          = m.get("hy_spread")
+        consumer_sentiment = m.get("consumer_sentiment")
+        yield_10_2_spread  = m.get("yield_10_2_spread")
+
+        # ── Count crash signals (0–7 with FRED; 0–5 without) ─────────────────
         crash_signals = 0
         crash_reasons = []
 
@@ -581,6 +853,16 @@ class MacroFetcher:
         if vix is not None and vix > 35:
             crash_signals += 1
             crash_reasons.append(f"VIX={vix:.1f} (extreme fear)")
+
+        # Signal 6 (FRED): Recession probability > 30%
+        if recession_prob is not None and recession_prob > 30:
+            crash_signals += 1
+            crash_reasons.append(f"FRED recession probability {recession_prob:.1f}%")
+
+        # Signal 7 (FRED): HY credit spread > 5% (severe credit stress)
+        if hy_spread is not None and hy_spread > 5.0:
+            crash_signals += 1
+            crash_reasons.append(f"FRED HY spread {hy_spread:.2f}% (credit stress)")
 
         m["crash_signals"] = crash_signals
 
@@ -622,8 +904,34 @@ class MacroFetcher:
                 if regime in ("neutral",):
                     regime = "falling_rate"
 
+        # FRED consumer sentiment: extreme pessimism signals risk-off
+        if consumer_sentiment is not None:
+            if consumer_sentiment < 60:
+                reasons.append(
+                    f"Consumer sentiment low ({consumer_sentiment:.0f}) → risk-off lean"
+                )
+                if regime == "neutral":
+                    regime = "risk_off"
+            elif consumer_sentiment > 90:
+                reasons.append(
+                    f"Consumer sentiment high ({consumer_sentiment:.0f}) → risk-on"
+                )
+                if regime == "neutral":
+                    regime = "risk_on"
+
+        # FRED 10Y-2Y spread: use as additional yield curve signal
+        if yield_10_2_spread is not None:
+            if yield_10_2_spread < -0.5:
+                reasons.append(
+                    f"10Y-2Y spread {yield_10_2_spread:.2f}% (deeply inverted — FRED)"
+                )
+            elif yield_10_2_spread > 1.5:
+                reasons.append(
+                    f"10Y-2Y spread {yield_10_2_spread:.2f}% (steep → growth optimism)"
+                )
+
         # Surface any sub-threshold crash signals for transparency
         if crash_reasons:
-            reasons.append(f"Crash signals ({crash_signals}/5): {'; '.join(crash_reasons)}")
+            reasons.append(f"Crash signals ({crash_signals}/7): {'; '.join(crash_reasons)}")
 
         return regime, reasons

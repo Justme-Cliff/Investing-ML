@@ -902,6 +902,14 @@ def run_analysis(profile: UserProfile) -> dict:
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
+    # ── Tier 2 enrichment: options flow + Google Trends + Reddit ──────────────
+    prog.progress(46, text="Enriching top 30 with options flow + retail sentiment…")
+    try:
+        from advisor.alternative_data import enrich_top_n
+        ranked_df = enrich_top_n(ranked_df, res["universe_data"], res["macro_data"], n=30)
+    except Exception:
+        pass   # enrichment is best-effort; pipeline continues regardless
+
     # Fresh picks mode: penalise tickers from recent sessions
     if profile.avoid_recent:
         _cfg           = st.session_state.get("settings", DEFAULT_SETTINGS)
@@ -951,6 +959,8 @@ def run_analysis(profile: UserProfile) -> dict:
             macro_data=res.get("macro_data"),
             valuation_results=res.get("valuation"),
             universe_data=res.get("universe_data"),
+            risk_results=res.get("risk"),
+            protocol_results=res.get("protocol"),
         )
         memory.save()
     except Exception as _mem_err:
@@ -4087,79 +4097,336 @@ def render_session_detail(session: dict):
             )
             st.plotly_chart(fig, use_container_width=True)
 
-    # ── Full pick cards ───────────────────────────────────────────────────────
-    st.markdown(shdr("Full Portfolio — Picks As Generated", f"All factor scores, entries, and P&L"), unsafe_allow_html=True)
+    # ── Full pick cards (with valuation, risk, protocol) ─────────────────────
+    st.markdown(shdr("Full Portfolio — Picks As Generated",
+                     "Factor scores · Valuation · Risk · Protocol — exactly as generated"),
+                unsafe_allow_html=True)
 
-    for idx in range(0, len(picks), 2):
-        cols = st.columns(2)
-        for col_idx, col in enumerate(cols):
-            pi = idx + col_idx
-            if pi >= len(picks):
-                break
-            pick    = picks[pi]
-            t       = pick["ticker"]
-            ep      = pick.get("price_entry", 0)
-            sc      = pick.get("composite_score", 0)
-            factors = pick.get("factors", {})
-            lp      = prices_now.get(t)
-            ev_p    = ev_picks_map.get(t, {})
-            exit_p  = ev_p.get("price_exit")
-            final_r = ev_p.get("return")
+    # Macro snapshot banner
+    macro_snap = session.get("macro_snapshot", {})
+    if macro_snap:
+        regime  = macro_snap.get("regime", "neutral")
+        vix_v   = macro_snap.get("vix")
+        y10_v   = macro_snap.get("yield_10y")
+        crash_s = macro_snap.get("crash_signals")
+        regime_colors = {
+            "crisis": RED, "pre_crisis": AMBER, "risk_off": AMBER,
+            "risk_on": GREEN, "rising_rate": AMBER, "falling_rate": GREEN, "neutral": BLUE,
+        }
+        rc = regime_colors.get(regime, BLUE)
+        snap_html = (
+            f'<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;'
+            f'margin-bottom:20px;padding:12px 18px;background:{GRAY_LT};'
+            f'border:1px solid {BORDER};border-radius:10px;font-size:13px">'
+            f'<span style="font-weight:700;color:{MUTED}">Macro at time of analysis:</span>'
+            f'<span style="background:{rc};color:#fff;padding:3px 12px;border-radius:12px;'
+            f'font-weight:700;font-size:12px">{regime.upper()}</span>'
+        )
+        if vix_v is not None:
+            snap_html += f'<span style="color:{TEXT}">VIX <b>{vix_v:.1f}</b></span>'
+        if y10_v is not None:
+            snap_html += f'<span style="color:{TEXT}">10Y Yield <b>{y10_v:.2f}%</b></span>'
+        if crash_s is not None:
+            cs_c = RED if crash_s >= 3 else AMBER if crash_s >= 2 else TEXT
+            snap_html += (
+                f'<span style="color:{cs_c}">Crash signals <b>{crash_s}/5</b></span>'
+            )
+        snap_html += '</div>'
+        st.markdown(snap_html, unsafe_allow_html=True)
 
-            sc_c   = score_color(sc)
-            live_r = ((lp / ep - 1) * 100) if lp and ep else None
-            ret_show = (final_r * 100) if final_r is not None else live_r
-            ret_lbl  = "Final Return" if final_r is not None else "Live P&L"
-            ret_c_   = GREEN if (ret_show or 0) >= 0 else RED
+    def _kv(label, val_html):
+        return (
+            f'<div style="display:flex;justify-content:space-between;align-items:center;'
+            f'padding:4px 0;border-bottom:1px solid {BORDER};font-size:12px">'
+            f'<span style="color:{MUTED}">{label}</span>'
+            f'<span style="font-weight:700">{val_html}</span>'
+            f'</div>'
+        )
 
-            # Factor bars
-            fbar = ""
-            for fname, flabel in _FLABELS.items():
-                fval = factors.get(f"{fname}_score")
-                if fval is not None:
-                    fw = min(float(fval), 100)
-                    fc = score_color(fw)
-                    fbar += (
-                        f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'
-                        f'<div style="width:66px;font-size:10px;color:{MUTED};text-align:right">{flabel}</div>'
-                        f'<div style="flex:1;background:{BORDER};border-radius:3px;height:6px">'
-                        f'<div style="width:{fw:.0f}%;background:{fc};border-radius:3px;height:100%"></div></div>'
-                        f'<div style="width:28px;font-size:10px;font-weight:700;color:{fc}">{fw:.0f}</div>'
-                        f'</div>'
-                    )
+    sorted_picks = sorted(picks, key=lambda p: p.get("composite_score", 0), reverse=True)
 
-            with col:
+    for pi, pick in enumerate(sorted_picks):
+        t       = pick["ticker"]
+        ep      = pick.get("price_entry", 0)
+        sc      = pick.get("composite_score", 0)
+        factors = pick.get("factors", {})
+        lp      = prices_now.get(t)
+        ev_p    = ev_picks_map.get(t, {})
+        exit_p  = ev_p.get("price_exit")
+        final_r = ev_p.get("return")
+
+        sc_c     = score_color(sc)
+        live_r   = ((lp / ep - 1) * 100) if lp and ep else None
+        ret_show = (final_r * 100) if final_r is not None else live_r
+        ret_lbl  = "Final Return" if final_r is not None else "Live P&L"
+
+        if ret_show is not None:
+            ret_str = f"{ret_show:+.1f}% {ret_lbl}"
+        else:
+            ret_str = "P&L pending"
+
+        label_str = f"#{pi+1}  {t}  ·  Score: {sc:.0f}  ·  Entry: ${ep:,.2f}  ·  {ret_str}"
+
+        with st.expander(label_str, expanded=(pi == 0)):
+            val_data   = pick.get("valuation") or {}
+            risk_data  = pick.get("risk") or {}
+            proto_data = pick.get("protocol") or {}
+
+            c1, c2, c3 = st.columns(3)
+
+            # ── Col 1: Valuation ─────────────────────────────────────────────
+            with c1:
                 st.markdown(
-                    f'<div style="background:#FAFAFA;border:1px solid {BORDER};'
-                    f'border-left:4px solid {sc_c};border-radius:12px;'
-                    f'padding:16px 18px;margin-bottom:12px">'
-                    # Header row
-                    f'<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px">'
-                    f'<div>'
-                    f'<div style="font-size:22px;font-weight:900;color:{TEXT}">{t}</div>'
-                    f'<div style="font-size:11px;color:{MUTED};margin-top:2px">'
-                    f'Entry: <b style="color:{TEXT}">${ep:,.2f}</b>'
-                    f'{"  →  Exit: <b style=color:" + TEXT + ">${" + f"{exit_p:,.2f}" + "}</b>" if exit_p else ""}'
-                    f'{"  →  Now: <b style=color:" + TEXT + ">${" + f"{lp:,.2f}" + "}</b>" if lp and not exit_p else ""}'
-                    f'</div></div>'
-                    f'<div style="text-align:right">'
-                    f'<div style="font-size:22px;font-weight:900;color:{sc_c}">{sc:.0f}</div>'
-                    f'<div style="font-size:10px;color:{MUTED2}">score</div>'
-                    f'</div></div>'
-                    # Score bar
-                    f'<div style="background:{BORDER};border-radius:4px;height:6px;margin-bottom:12px">'
-                    f'<div style="width:{min(sc,100):.0f}%;background:{sc_c};border-radius:4px;height:100%"></div></div>'
-                    # Return badge
-                    + (f'<div style="background:{GREEN_LT if (ret_show or 0)>=0 else RED_LT};'
-                       f'color:{ret_c_};font-weight:800;font-size:16px;padding:8px 12px;'
-                       f'border-radius:8px;text-align:center;margin-bottom:12px">'
-                       f'{ret_show:+.1f}%  <span style="font-size:10px;font-weight:500">{ret_lbl}</span>'
-                       f'</div>' if ret_show is not None else "")
-                    # Factor bars
-                    + f'<div>{fbar}</div>'
-                    f'</div>',
+                    f'<div style="background:#EFF6FF;border:1px solid #BFDBFE;'
+                    f'border-radius:10px;padding:14px 16px;height:100%">'
+                    f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:.08em;color:{BLUE};margin-bottom:10px">Valuation</div>',
                     unsafe_allow_html=True,
                 )
+                if val_data:
+                    fv     = val_data.get("fair_value")
+                    sig    = val_data.get("signal", "—")
+                    ent_lo = val_data.get("entry_low")
+                    ent_hi = val_data.get("entry_high")
+                    tgt    = val_data.get("target")
+                    stp    = val_data.get("stop_loss")
+                    rr     = val_data.get("rr_ratio")
+                    up     = val_data.get("upside_pct")
+                    prem   = val_data.get("premium_pct")
+                    ests   = val_data.get("estimates", {})
+                    sens   = val_data.get("sensitivity", {})
+
+                    sig_colors = {
+                        "STRONG_BUY": GREEN, "BUY": "#16a34a",
+                        "HOLD_WATCH": AMBER, "WAIT": "#d97706", "AVOID_PEAK": RED,
+                    }
+                    sc_color_val = sig_colors.get(sig, MUTED)
+
+                    kv_rows = ""
+                    if fv:
+                        kv_rows += _kv("Fair Value", f'<span style="color:{BLUE}">${fv:,.2f}</span>')
+                    if ent_lo and ent_hi:
+                        kv_rows += _kv("Entry Zone", f'${ent_lo:,.2f} – ${ent_hi:,.2f}')
+                    if tgt:
+                        kv_rows += _kv("Target", f'${tgt:,.2f}')
+                    if stp:
+                        kv_rows += _kv("Stop Loss", f'<span style="color:{RED}">${stp:,.2f}</span>')
+                    if rr is not None:
+                        kv_rows += _kv("Risk / Reward", f'{rr:.2f}x')
+                    if up is not None:
+                        up_c = GREEN if up > 0 else RED
+                        kv_rows += _kv("Upside", f'<span style="color:{up_c}">{up:+.1f}%</span>')
+                    if prem is not None:
+                        prem_c = RED if prem > 0 else GREEN
+                        kv_rows += _kv("Premium/Discount", f'<span style="color:{prem_c}">{prem:+.1f}%</span>')
+
+                    est_rows = ""
+                    method_labels = {
+                        "dcf": "DCF", "graham": "Graham",
+                        "ev_ebitda": "EV/EBITDA", "fcf_yield": "FCF Yield",
+                    }
+                    for k, lbl in method_labels.items():
+                        v = ests.get(k)
+                        if v:
+                            est_rows += _kv(lbl, f'${v:,.2f}')
+
+                    sens_html = ""
+                    if sens:
+                        sens_html = (
+                            f'<div style="margin-top:10px;font-size:11px;font-weight:700;'
+                            f'color:{MUTED};margin-bottom:4px">DCF Sensitivity</div>'
+                            f'<table style="width:100%;font-size:11px;border-collapse:collapse">'
+                            f'<tr style="color:{MUTED}">'
+                            f'<th style="text-align:left;padding:2px 4px">Scenario</th>'
+                            f'<th style="text-align:right;padding:2px 4px">Fair Value</th>'
+                            f'<th style="text-align:right;padding:2px 4px">Signal</th>'
+                            f'</tr>'
+                        )
+                        scenario_colors = {"Bear": RED, "Base": BLUE, "Bull": GREEN}
+                        for scenario in ["Bear", "Base", "Bull"]:
+                            sd  = sens.get(scenario, {})
+                            sfv = sd.get("fair_value")
+                            ssig= sd.get("signal", "—")
+                            sc_s= scenario_colors.get(scenario, MUTED)
+                            if sfv:
+                                sens_html += (
+                                    f'<tr>'
+                                    f'<td style="padding:3px 4px;color:{sc_s};font-weight:700">{scenario}</td>'
+                                    f'<td style="text-align:right;padding:3px 4px">${sfv:,.2f}</td>'
+                                    f'<td style="text-align:right;padding:3px 4px;color:{MUTED};font-size:10px">{ssig}</td>'
+                                    f'</tr>'
+                                )
+                        sens_html += '</table>'
+
+                    st.markdown(
+                        f'<div style="background:{sc_color_val};color:#fff;font-weight:800;'
+                        f'font-size:13px;padding:5px 10px;border-radius:6px;'
+                        f'text-align:center;margin-bottom:10px">{sig.replace("_", " ")}</div>'
+                        + kv_rows
+                        + (f'<div style="margin-top:10px;font-size:11px;font-weight:700;'
+                           f'color:{MUTED};margin-bottom:4px">Method Estimates</div>' + est_rows
+                           if est_rows else "")
+                        + sens_html
+                        + '</div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div style="color:{MUTED};font-size:12px;padding:8px 0">'
+                        f'Valuation not stored (older session format).</div></div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Col 2: Risk ──────────────────────────────────────────────────
+            with c2:
+                st.markdown(
+                    f'<div style="background:#ECFDF5;border:1px solid #A7F3D0;'
+                    f'border-radius:10px;padding:14px 16px;height:100%">'
+                    f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:.08em;color:{GREEN};margin-bottom:10px">Risk & Quality</div>',
+                    unsafe_allow_html=True,
+                )
+                if risk_data:
+                    az   = risk_data.get("altman_z", {})
+                    rw   = risk_data.get("roic_wacc", {})
+                    pio  = risk_data.get("piotroski", {})
+
+                    az_score  = az.get("score")
+                    az_zone   = az.get("zone", "—")
+                    az_c = GREEN if "Safe" in az_zone else RED if "Distress" in az_zone else AMBER
+
+                    sharpe = risk_data.get("sharpe")
+                    sortino= risk_data.get("sortino")
+                    maxdd  = risk_data.get("max_drawdown_pct")
+                    var95  = risk_data.get("var_95_pct")
+
+                    roic    = rw.get("roic")
+                    wacc    = rw.get("wacc")
+                    spread  = rw.get("spread")
+                    rw_verd = rw.get("verdict", "—")
+                    rw_c    = GREEN if "Creating" in rw_verd else RED
+
+                    pio_sc  = pio.get("score")
+                    pio_int = pio.get("interpretation", "—")
+                    pio_c   = GREEN if (pio_sc or 0) >= 7 else RED if (pio_sc or 0) <= 3 else AMBER
+
+                    kv_rows = ""
+                    if az_score is not None:
+                        kv_rows += _kv("Altman Z-Score",
+                                       f'<span style="color:{az_c}">{az_score:.2f} ({az_zone})</span>')
+                    if sharpe is not None:
+                        sh_c = GREEN if sharpe >= 1 else RED if sharpe < 0 else AMBER
+                        kv_rows += _kv("Sharpe Ratio",
+                                       f'<span style="color:{sh_c}">{sharpe:.2f}</span>')
+                    if sortino is not None:
+                        so_c = GREEN if sortino >= 1 else RED if sortino < 0 else AMBER
+                        kv_rows += _kv("Sortino Ratio",
+                                       f'<span style="color:{so_c}">{sortino:.2f}</span>')
+                    if maxdd is not None:
+                        kv_rows += _kv("Max Drawdown",
+                                       f'<span style="color:{RED}">{maxdd:.1f}%</span>')
+                    if var95 is not None:
+                        kv_rows += _kv("VaR 95%",
+                                       f'<span style="color:{RED}">{var95:.1f}%</span>')
+                    if roic is not None:
+                        kv_rows += _kv("ROIC", f'{roic:.1f}%')
+                    if wacc is not None:
+                        kv_rows += _kv("WACC", f'{wacc:.1f}%')
+                    if spread is not None:
+                        kv_rows += _kv("ROIC – WACC",
+                                       f'<span style="color:{rw_c}">{spread:+.1f}%</span>')
+                    if pio_sc is not None:
+                        kv_rows += _kv("Piotroski F-Score",
+                                       f'<span style="color:{pio_c}">{pio_sc}/9 ({pio_int})</span>')
+
+                    st.markdown(f'{kv_rows}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f'<div style="color:{MUTED};font-size:12px;padding:8px 0">'
+                        f'Risk data not stored (older session format).</div></div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # ── Col 3: Protocol + Factor Scores ──────────────────────────────
+            with c3:
+                # Protocol gates
+                st.markdown(
+                    f'<div style="background:#FFFBEB;border:1px solid #FDE68A;'
+                    f'border-radius:10px;padding:14px 16px;margin-bottom:12px">'
+                    f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:.08em;color:{AMBER};margin-bottom:10px">Protocol Gates</div>',
+                    unsafe_allow_html=True,
+                )
+                if proto_data:
+                    gates      = proto_data.get("gates", [])
+                    gate_stats = proto_data.get("gate_statuses", [])
+                    pass_ct    = proto_data.get("pass_count", 0)
+                    conv       = proto_data.get("conviction", "—")
+                    ov_score   = proto_data.get("overall_score", 0)
+
+                    conv_colors = {
+                        "STRONG BUY": GREEN, "BUY": "#16a34a",
+                        "WATCH": AMBER, "AVOID": RED,
+                    }
+                    cc = conv_colors.get(conv, MUTED)
+
+                    gate_html = (
+                        f'<div style="background:{cc};color:#fff;font-weight:800;'
+                        f'font-size:12px;padding:4px 10px;border-radius:6px;'
+                        f'text-align:center;margin-bottom:8px">'
+                        f'{conv}  ·  {pass_ct}/7 passed  ·  {ov_score:.0f}pts</div>'
+                    )
+                    status_icons = {"PASS": (GREEN, "✓"), "WARN": (AMBER, "~"), "FAIL": (RED, "✗")}
+                    for gi, (gate_name, gate_st) in enumerate(zip(gates, gate_stats)):
+                        color, sym = status_icons.get(gate_st, (MUTED, "?"))
+                        short_name = gate_name[:28] + "…" if len(gate_name) > 28 else gate_name
+                        gate_html += (
+                            f'<div style="display:flex;align-items:center;gap:5px;'
+                            f'padding:2px 0;font-size:11px">'
+                            f'<span style="color:{color};font-weight:800;width:12px">{sym}</span>'
+                            f'<span style="color:{color};font-weight:600;width:36px">G{gi+1}</span>'
+                            f'<span style="color:{MUTED};flex:1;overflow:hidden;'
+                            f'text-overflow:ellipsis;white-space:nowrap">{short_name}</span>'
+                            f'</div>'
+                        )
+                    st.markdown(f'{gate_html}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f'<div style="color:{MUTED};font-size:12px;padding:8px 0">'
+                        f'Protocol not stored (older session format).</div></div>',
+                        unsafe_allow_html=True,
+                    )
+
+                # Factor score bars
+                st.markdown(
+                    f'<div style="background:{GRAY_LT};border:1px solid {BORDER};'
+                    f'border-radius:10px;padding:14px 16px">'
+                    f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
+                    f'letter-spacing:.08em;color:{MUTED};margin-bottom:10px">Factor Scores</div>',
+                    unsafe_allow_html=True,
+                )
+                fbar = ""
+                for fname, flabel in _FLABELS.items():
+                    fval = factors.get(fname)  # stored WITHOUT _score suffix
+                    if fval is not None:
+                        fw = min(float(fval), 100)
+                        fc = score_color(fw)
+                        fbar += (
+                            f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">'
+                            f'<div style="width:66px;font-size:10px;color:{MUTED};text-align:right">{flabel}</div>'
+                            f'<div style="flex:1;background:{BORDER};border-radius:3px;height:7px">'
+                            f'<div style="width:{fw:.0f}%;background:{fc};border-radius:3px;height:100%"></div></div>'
+                            f'<div style="width:28px;font-size:10px;font-weight:700;color:{fc}">{fw:.0f}</div>'
+                            f'</div>'
+                        )
+                if fbar:
+                    st.markdown(f'{fbar}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(
+                        f'<div style="color:{MUTED};font-size:12px">'
+                        f'Factor scores not available.</div></div>',
+                        unsafe_allow_html=True,
+                    )
 
     # ── Footer ────────────────────────────────────────────────────────────────
     st.markdown(

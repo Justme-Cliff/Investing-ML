@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "learned_weights": {},
   "sessions": [
     {
@@ -26,7 +26,8 @@
             "technical": 93.51304134630955,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LRCX",
@@ -40,7 +41,8 @@
             "technical": 57.19711718858633,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "KLAC",
@@ -54,7 +56,8 @@
             "technical": 96.44986993775898,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "NEM",
@@ -68,7 +71,8 @@
             "technical": 93.39883601737618,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "SPG",
@@ -82,7 +86,8 @@
             "technical": 80.23011586921287,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "ALB",
@@ -96,7 +101,8 @@
             "technical": 99.11042645737157,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LLY",
@@ -110,7 +116,8 @@
             "technical": 100.0,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "MRK",
@@ -124,7 +131,8 @@
             "technical": 53.24228895891091,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "GILD",
@@ -138,7 +146,8 @@
             "technical": 70.09121651550404,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LMT",
@@ -152,9 +161,12 @@
             "technical": 65.0616043101769,
             "sentiment": 50.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         }
-      ]
+      ],
+      "evaluations": {},
+      "macro_regime": "neutral"
     },
     {
       "session_id": "b962592f",
@@ -180,7 +192,8 @@
             "technical": 69.80168450858748,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "KLAC",
@@ -194,7 +207,8 @@
             "technical": 97.26785262336388,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "NEM",
@@ -208,7 +222,8 @@
             "technical": 82.47675741428799,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "AMAT",
@@ -222,7 +237,8 @@
             "technical": 94.25199918327247,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "GOOGL",
@@ -236,7 +252,8 @@
             "technical": 61.263153819288775,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "SPG",
@@ -250,7 +267,8 @@
             "technical": 64.43509990730129,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "AAPL",
@@ -264,7 +282,8 @@
             "technical": 96.58727634166414,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "GILD",
@@ -278,7 +297,8 @@
             "technical": 81.65809332591046,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "MRK",
@@ -292,7 +312,8 @@
             "technical": 55.66903442201625,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LLY",
@@ -306,9 +327,12 @@
             "technical": 91.5148422388169,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         }
-      ]
+      ],
+      "evaluations": {},
+      "macro_regime": "neutral"
     },
     {
       "session_id": "78314ae0",
@@ -334,7 +358,8 @@
             "technical": 69.80168450862621,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "KLAC",
@@ -348,7 +373,8 @@
             "technical": 97.26785262341676,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "NEM",
@@ -362,7 +388,8 @@
             "technical": 82.47675741401625,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "AMAT",
@@ -376,7 +403,8 @@
             "technical": 94.25199918344543,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "SPG",
@@ -390,7 +418,8 @@
             "technical": 64.43509990733703,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "GILD",
@@ -404,7 +433,8 @@
             "technical": 81.65809332504541,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "AMGN",
@@ -418,7 +448,8 @@
             "technical": 73.83376805651382,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "MRK",
@@ -432,7 +463,8 @@
             "technical": 55.669034422047126,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LLY",
@@ -446,7 +478,8 @@
             "technical": 91.51484223883494,
             "sentiment": 61.53846153846151,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LMT",
@@ -460,9 +493,12 @@
             "technical": 67.80638658609675,
             "sentiment": 0.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         }
-      ]
+      ],
+      "evaluations": {},
+      "macro_regime": "neutral"
     },
     {
       "session_id": "1a59d81d",
@@ -488,7 +524,8 @@
             "technical": 46.83981509441167,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "JNJ",
@@ -502,7 +539,8 @@
             "technical": 37.59467259668635,
             "sentiment": 66.66666666666664,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "ITW",
@@ -516,7 +554,8 @@
             "technical": 63.370392662923024,
             "sentiment": 13.333333333333345,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "ZTS",
@@ -530,7 +569,8 @@
             "technical": 56.00678647060345,
             "sentiment": 66.66666666666664,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "MMM",
@@ -544,7 +584,8 @@
             "technical": 68.25111358401811,
             "sentiment": 66.66666666666664,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "TMO",
@@ -558,7 +599,8 @@
             "technical": 66.68692167575388,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "V",
@@ -572,7 +614,8 @@
             "technical": 69.90955524248211,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "AVGO",
@@ -586,7 +629,8 @@
             "technical": 51.6189154603157,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "LNG",
@@ -600,7 +644,8 @@
             "technical": 30.545671484807652,
             "sentiment": 100.0,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
         },
         {
           "ticker": "REGN",
@@ -614,9 +659,451 @@
             "technical": 73.21957617292964,
             "sentiment": 66.66666666666664,
             "dividend": 100.0
-          }
+          },
+          "sector": "Unknown"
+        }
+      ],
+      "evaluations": {},
+      "macro_regime": "neutral"
+    },
+    {
+      "session_id": "587f2c10",
+      "timestamp": "2026-03-02T02:22:49.107402+00:00",
+      "macro_regime": "neutral",
+      "profile": {
+        "risk_level": 3,
+        "time_horizon": "long",
+        "goal": "speculative"
+      },
+      "sp500_entry": 6878.8798828125,
+      "evaluations": {},
+      "evaluation": null,
+      "evaluated": false,
+      "picks": [
+        {
+          "ticker": "TGS",
+          "price_entry": 29.6200008392334,
+          "composite_score": 69.13137697257977,
+          "sector": "Energy",
+          "factors": {
+            "momentum": 8.154846260637603,
+            "volatility": 81.09105485544096,
+            "value": 100.0,
+            "quality": 83.25355004348691,
+            "technical": 44.22525949852853,
+            "sentiment": 56.4102564102564,
+            "dividend": 100.0
+          },
+          "valuation_signal": "STRONG_BUY"
+        },
+        {
+          "ticker": "SCZM",
+          "price_entry": 12.550000190734863,
+          "composite_score": 68.21985112082042,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 59.68769316276487,
+            "volatility": 58.953880321197474,
+            "value": 48.63492930824796,
+            "quality": 79.36486424694155,
+            "technical": 83.0881126643454,
+            "sentiment": 30.769230769230766,
+            "dividend": 0.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "ESEA",
+          "price_entry": 68.73999786376953,
+          "composite_score": 66.22211530751363,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 12.572263294366257,
+            "volatility": 78.62248473125659,
+            "value": 66.47100817672383,
+            "quality": 91.76886447544767,
+            "technical": 45.45296264207313,
+            "sentiment": 69.23076923076923,
+            "dividend": 100.0
+          },
+          "valuation_signal": "STRONG_BUY"
+        },
+        {
+          "ticker": "TSM",
+          "price_entry": 374.5799865722656,
+          "composite_score": 66.01732147319515,
+          "sector": "Technology",
+          "factors": {
+            "momentum": 13.756627713773097,
+            "volatility": 88.90349353144107,
+            "value": 59.0886757911562,
+            "quality": 93.73533391521948,
+            "technical": 88.15831182179035,
+            "sentiment": 30.769230769230766,
+            "dividend": 100.0
+          },
+          "valuation_signal": "STRONG_BUY"
+        },
+        {
+          "ticker": "B",
+          "price_entry": 50.7400016784668,
+          "composite_score": 65.60864155942804,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 18.77357533392194,
+            "volatility": 89.86996004667695,
+            "value": 52.55132605856561,
+            "quality": 84.64819289436682,
+            "technical": 77.76688384500574,
+            "sentiment": 56.4102564102564,
+            "dividend": 100.0
+          },
+          "valuation_signal": "BUY"
+        },
+        {
+          "ticker": "MU",
+          "price_entry": 412.3699951171875,
+          "composite_score": 62.57089074611371,
+          "sector": "Technology",
+          "factors": {
+            "momentum": 32.69995763403657,
+            "volatility": 83.66689956400838,
+            "value": 49.18502863551109,
+            "quality": 88.87010094817825,
+            "technical": 62.935164949881916,
+            "sentiment": 26.522129473279538,
+            "dividend": 73.33333333333334
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "SNA",
+          "price_entry": 385.2200012207031,
+          "composite_score": 61.68454797984465,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 8.54754218033337,
+            "volatility": 94.56650284521925,
+            "value": 52.61688963168856,
+            "quality": 82.65315655534627,
+            "technical": 87.22412340781543,
+            "sentiment": 5.128205128205133,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "OR",
+          "price_entry": 47.38999938964844,
+          "composite_score": 60.91870782088395,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 15.92461899478228,
+            "volatility": 90.02655878771215,
+            "value": 24.335346536059138,
+            "quality": 91.23584268085962,
+            "technical": 75.68264463673596,
+            "sentiment": 56.4102564102564,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "WMS",
+          "price_entry": 171.33999633789062,
+          "composite_score": 59.13616621221071,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 9.572820153487203,
+            "volatility": 86.99261897512154,
+            "value": 47.98176694381304,
+            "quality": 83.52253814117473,
+            "technical": 58.365135028434686,
+            "sentiment": 38.46153846153847,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "LRN",
+          "price_entry": 84.37999725341797,
+          "composite_score": 58.275530479447774,
+          "sector": "Consumer",
+          "factors": {
+            "momentum": 4.4936511570616355,
+            "volatility": 82.54794397529707,
+            "value": 61.502120403581515,
+            "quality": 82.13598623430872,
+            "technical": 59.08972434959867,
+            "sentiment": 56.4102564102564,
+            "dividend": 0.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        }
+      ]
+    },
+    {
+      "session_id": "af818d8c",
+      "timestamp": "2026-03-02T17:50:43.139624+00:00",
+      "macro_regime": "neutral",
+      "profile": {
+        "risk_level": 3,
+        "time_horizon": "long",
+        "goal": "income"
+      },
+      "sp500_entry": 6882.27978515625,
+      "evaluations": {},
+      "evaluation": null,
+      "evaluated": false,
+      "picks": [
+        {
+          "ticker": "B",
+          "price_entry": 49.85499954223633,
+          "composite_score": 83.18913370447987,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 16.801579918706473,
+            "volatility": 87.5882296179973,
+            "value": 95.28816968851356,
+            "quality": 84.64819289436682,
+            "technical": 84.42603620422344,
+            "sentiment": 56.4102564102564,
+            "dividend": 100.0
+          },
+          "valuation_signal": "BUY"
+        },
+        {
+          "ticker": "KLAC",
+          "price_entry": 1529.050048828125,
+          "composite_score": 82.24706807282799,
+          "sector": "Technology",
+          "factors": {
+            "momentum": 14.431672236041235,
+            "volatility": 84.56453628178744,
+            "value": 92.88714171378017,
+            "quality": 96.72409088644483,
+            "technical": 89.73238015050919,
+            "sentiment": 25.64102564102563,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "WPM",
+          "price_entry": 162.5399932861328,
+          "composite_score": 81.11930201669826,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 13.975756042906278,
+            "volatility": 87.99999850826008,
+            "value": 88.1404485860589,
+            "quality": 87.56049697534195,
+            "technical": 69.6867256427063,
+            "sentiment": 69.23076923076923,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "LRCX",
+          "price_entry": 231.27999877929688,
+          "composite_score": 80.59035542113322,
+          "sector": "Technology",
+          "factors": {
+            "momentum": 21.007454520904588,
+            "volatility": 83.55883272841564,
+            "value": 92.26593197062952,
+            "quality": 96.31474681390452,
+            "technical": 65.90025932278955,
+            "sentiment": 25.64102564102563,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "NEM",
+          "price_entry": 127.57499694824219,
+          "composite_score": 80.16234708463692,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 17.100355003380628,
+            "volatility": 86.96463862689416,
+            "value": 94.79985553480573,
+            "quality": 79.0283396612742,
+            "technical": 89.6073908993063,
+            "sentiment": 25.64102564102563,
+            "dividend": 100.0
+          },
+          "valuation_signal": "HOLD_WATCH"
+        },
+        {
+          "ticker": "LLY",
+          "price_entry": 1028.64501953125,
+          "composite_score": 78.5425941076579,
+          "sector": "Healthcare",
+          "factors": {
+            "momentum": 8.505479819371278,
+            "volatility": 88.56704952077212,
+            "value": 91.27694703039032,
+            "quality": 91.91945818023056,
+            "technical": 82.79104259556134,
+            "sentiment": 25.64102564102563,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "CTAS",
+          "price_entry": 201.11500549316406,
+          "composite_score": 77.86963998259064,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 6.1247482678471785,
+            "volatility": 92.30292167196401,
+            "value": 90.70137690767801,
+            "quality": 86.43963050751313,
+            "technical": 65.27673108902886,
+            "sentiment": 35.8974358974359,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "ECO",
+          "price_entry": 55.630001068115234,
+          "composite_score": 77.83607609546367,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 16.287429342810096,
+            "volatility": 84.1722408431785,
+            "value": 96.11752152914204,
+            "quality": 79.49151454341201,
+            "technical": 47.79190981577492,
+            "sentiment": 69.23076923076923,
+            "dividend": 100.0
+          },
+          "valuation_signal": "AVOID_PEAK"
+        },
+        {
+          "ticker": "CF",
+          "price_entry": 102.74500274658203,
+          "composite_score": 76.84052641666908,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 8.918725952075683,
+            "volatility": 87.00591703712878,
+            "value": 96.55252424449394,
+            "quality": 83.6257408987357,
+            "technical": 65.44901935362279,
+            "sentiment": 5.128205128205133,
+            "dividend": 100.0
+          },
+          "valuation_signal": "STRONG_BUY"
+        },
+        {
+          "ticker": "GILD",
+          "price_entry": 149.44000244140625,
+          "composite_score": 75.54300677013455,
+          "sector": "Healthcare",
+          "factors": {
+            "momentum": 9.37136138345979,
+            "volatility": 91.74888540846587,
+            "value": 95.5542356218504,
+            "quality": 81.66372966009925,
+            "technical": 76.00021831778979,
+            "sentiment": 25.64102564102563,
+            "dividend": 100.0
+          },
+          "valuation_signal": "WAIT"
         }
       ]
     }
-  ]
+  ],
+  "sector_factor_corr": {},
+  "regime_factor_corr": {},
+  "winner_patterns": [],
+  "loser_patterns": [
+    {
+      "f": [
+        20,
+        15,
+        45,
+        10,
+        20,
+        20,
+        0
+      ],
+      "sector": "Unknown",
+      "regime": "neutral",
+      "r": -0.65,
+      "alpha": -0.6,
+      "source": "graveyard"
+    },
+    {
+      "f": [
+        85,
+        10,
+        20,
+        12,
+        70,
+        80,
+        0
+      ],
+      "sector": "Unknown",
+      "regime": "neutral",
+      "r": -0.72,
+      "alpha": -0.68,
+      "source": "graveyard"
+    },
+    {
+      "f": [
+        15,
+        25,
+        70,
+        15,
+        18,
+        30,
+        30
+      ],
+      "sector": "Unknown",
+      "regime": "neutral",
+      "r": -0.5,
+      "alpha": -0.45,
+      "source": "graveyard"
+    },
+    {
+      "f": [
+        25,
+        20,
+        40,
+        20,
+        22,
+        25,
+        40
+      ],
+      "sector": "Unknown",
+      "regime": "rising_rate",
+      "r": -0.58,
+      "alpha": -0.53,
+      "source": "graveyard"
+    },
+    {
+      "f": [
+        30,
+        30,
+        55,
+        18,
+        30,
+        35,
+        15
+      ],
+      "sector": "Unknown",
+      "regime": "neutral",
+      "r": -0.55,
+      "alpha": -0.5,
+      "source": "graveyard"
+    }
+  ],
+  "valuation_accuracy": {},
+  "sector_regime_returns": {}
 }
