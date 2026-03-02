@@ -3,6 +3,7 @@
 import io
 import time
 import math
+import logging
 import datetime
 import contextlib
 import warnings
@@ -13,6 +14,11 @@ import pandas as pd
 import yfinance as yf
 
 import requests
+
+# ── Suppress yfinance HTTP noise (500 errors, rate-limit warnings, etc.) ──────
+for _logger_name in ("yfinance", "yfinance.base", "yfinance.ticker",
+                     "yfinance.utils", "yfinance.cache", "peewee"):
+    logging.getLogger(_logger_name).setLevel(logging.CRITICAL)
 
 from config import (
     SP500_TICKER, VIX_TICKER, YIELD_10Y_TICKER,
@@ -400,7 +406,8 @@ class DataFetcher:
                 earnings_date      = None
                 earnings_days_away = None
                 try:
-                    cal   = t.calendar
+                    with contextlib.redirect_stderr(sink):
+                        cal = t.calendar
                     today = datetime.date.today()
                     dates = []
                     if isinstance(cal, dict):
@@ -429,7 +436,8 @@ class DataFetcher:
                 # ── Insider score (yfinance insider_transactions, last 90d) ───
                 insider_score = 50.0
                 try:
-                    ins = t.insider_transactions
+                    with contextlib.redirect_stderr(sink):
+                        ins = t.insider_transactions
                     if ins is not None and len(ins) > 0:
                         cutoff = datetime.date.today() - datetime.timedelta(days=90)
                         buys   = 0.0
@@ -470,9 +478,11 @@ class DataFetcher:
                 # ── Nearest-term implied volatility (options chain) ───────────
                 nearest_iv = None
                 try:
-                    expiries = t.options
+                    with contextlib.redirect_stderr(sink):
+                        expiries = t.options
                     if expiries:
-                        chain   = t.option_chain(expiries[0])
+                        with contextlib.redirect_stderr(sink):
+                            chain = t.option_chain(expiries[0])
                         c_iv    = chain.calls["impliedVolatility"].dropna()
                         p_iv    = chain.puts["impliedVolatility"].dropna()
                         c_med   = float(c_iv.median()) if len(c_iv) > 0 else 0.0
@@ -486,7 +496,8 @@ class DataFetcher:
                 # ── Source 1a: yfinance quarterly_financials → revenue trend (QoQ) ──
                 revenue_trend = None
                 try:
-                    qfin = t.quarterly_financials
+                    with contextlib.redirect_stderr(sink):
+                        qfin = t.quarterly_financials
                     if qfin is not None and not qfin.empty:
                         for rev_label in ("Total Revenue", "Revenue"):
                             if rev_label in qfin.index:
@@ -503,7 +514,8 @@ class DataFetcher:
                 # ── Source 1b: yfinance earnings_history → EPS beat rate ──────
                 earnings_beat_rate = None
                 try:
-                    eh = t.earnings_history
+                    with contextlib.redirect_stderr(sink):
+                        eh = t.earnings_history
                     if eh is not None and not eh.empty:
                         beats = 0
                         total_q = 0
@@ -532,7 +544,8 @@ class DataFetcher:
                 # ── Source 1c: yfinance major_holders → institutional ownership % ──
                 institutional_pct = None
                 try:
-                    mh = t.major_holders
+                    with contextlib.redirect_stderr(sink):
+                        mh = t.major_holders
                     if mh is not None and not mh.empty and len(mh) > 1:
                         # Row 1 is typically "% of Float Held by Institutions"
                         raw_val = str(mh.iloc[1, 0]).replace("%", "").strip()
