@@ -406,25 +406,37 @@ def enrich_top_n(
         return ranked_df
 
     top_tickers = ranked_df.head(n)["ticker"].tolist()
-    print(f"  Enriching top {len(top_tickers)} stocks with options flow + retail sentiment...")
+    total = len(top_tickers)
+    print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC)...")
 
-    for ticker in top_tickers:
+    def _bar(done: int, step: str = "", ticker: str = "") -> None:
+        pct    = done / total * 100
+        filled = int(pct / 5)
+        bar    = "█" * filled + "░" * (20 - filled)
+        label  = f"{ticker:<6}  {step}" if ticker else ""
+        print(f"  [{bar}] {pct:4.0f}%  {done}/{total}  {label:<30}", end="\r", flush=True)
+
+    for i, ticker in enumerate(top_tickers):
         data = universe_data.get(ticker)
         if not data:
+            _bar(i + 1, "skip (no data)", ticker)
             continue
 
         hist  = data.get("history")
         info  = data.get("info", {})
         if hist is None or len(hist) < 20:
+            _bar(i + 1, "skip (no hist)", ticker)
             continue
 
         close = hist["Close"].dropna()
         if len(close) < 20:
+            _bar(i + 1, "skip (no hist)", ticker)
             continue
 
         hist_vol = float(close.pct_change().dropna().std()) * math.sqrt(252)
 
         # ── Source 3: Options ─────────────────────────────────────────────────
+        _bar(i, "Options...    ", ticker)
         opt       = fetch_options_data(ticker, hist_vol)
         opt_score = opt.get("options_score", 50.0)
         iv_rank   = opt.get("iv_rank")
@@ -432,13 +444,16 @@ def enrich_top_n(
             universe_data[ticker]["iv_rank"] = iv_rank   # for risk.py
 
         # ── Google Trends ─────────────────────────────────────────────────────
+        _bar(i, "Trends...     ", ticker)
         trends_score = fetch_google_trends(ticker)
 
         # ── Reddit ────────────────────────────────────────────────────────────
+        _bar(i, "Reddit...     ", ticker)
         reddit_score = fetch_reddit_sentiment(ticker)
         retail_score = 0.60 * trends_score + 0.40 * reddit_score
 
         # ── Source 4: Alpha Vantage — EPS surprise history ────────────────────
+        _bar(i, "Alpha Vantage...", ticker)
         av_data      = fetch_alpha_vantage_earnings(ticker)
         av_beat_rate = av_data.get("av_eps_beat_rate")
         av_surp_avg  = av_data.get("av_eps_surprise_avg")
@@ -446,6 +461,7 @@ def enrich_top_n(
             universe_data[ticker]["av_data"] = av_data
 
         # ── Source 5: FMP — analyst revisions + financial rating ──────────────
+        _bar(i, "FMP...        ", ticker)
         fmp_data     = fetch_fmp_data(ticker)
         fmp_revision = fmp_data.get("fmp_analyst_revision")    # −1 to +1
         fmp_rating   = fmp_data.get("fmp_rating_score")        # 0–100
@@ -455,6 +471,7 @@ def enrich_top_n(
 
         # ── Source 6: SEC EDGAR — revenue validation/fallback ────────────────
         # Only fetch from SEC if yfinance revenue is missing (saves bandwidth)
+        _bar(i, "SEC EDGAR...  ", ticker)
         sec_data = {}
         if data.get("revenue_trend") is None and info.get("totalRevenue") is None:
             sec_data = fetch_sec_revenue_trend(ticker)
@@ -529,6 +546,11 @@ def enrich_top_n(
                 ranked_df.loc[idx, "composite_score"] + sentiment_delta + total_boost
             )
         ))
+
+        # Tick progress bar after fully completing this ticker
+        _bar(i + 1, "done          ", ticker)
+
+    print(f"  [{'█' * 20}] 100%  {total}/{total}  Tier 2 enrichment complete." + " " * 10)
 
     # Re-rank
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
