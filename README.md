@@ -5,11 +5,26 @@
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Data](https://img.shields.io/badge/Data-100%25%20Free-brightgreen?style=flat-square)
 ![APIs](https://img.shields.io/badge/Paid%20APIs-None%20Required-brightgreen?style=flat-square)
+![Theme](https://img.shields.io/badge/Theme-Wall%20Street%20Terminal-0A0D14?style=flat-square)
 
 > Hedge-fund grade quantitative stock analysis — entirely on free data.
 > No paid APIs. No AI subscriptions. Just math, discipline, and 7 independent data sources.
+> **Dark "Wall Street terminal" UI** by default — feels like Bloomberg without the $24k/year bill.
 
-It scores up to **500 stocks** across your investor profile, runs a **7-gate Warren Buffett protocol**, computes intrinsic value via **4 independent valuation methods**, backtests the strategy on historical prices, and delivers analysis that would cost thousands per month on a professional terminal — **for free**.
+It scores up to **500 stocks** across your investor profile, runs a **7-gate Warren Buffett protocol**, computes intrinsic value via **4 independent valuation methods**, performs Monte Carlo simulations, backtests the strategy on historical prices, and delivers analysis that would cost thousands per month on a professional terminal — **for free**.
+
+### Key Stats
+
+| Metric | Value |
+|--------|-------|
+| Stocks Scored | Up to 500 per run |
+| Data Sources | 7 independent (Tier 1 all-tickers + Tier 2 top-30) |
+| Valuation Methods | 4 (DCF, Graham, EV/EBITDA, FCF Yield) |
+| Risk Metrics | 11 (Altman Z, Sharpe, Sortino, VaR, ROIC/WACC, Piotroski, Accruals…) |
+| Protocol Gates | 7 (Warren Buffett-inspired) |
+| Quant Charts | 10 (5 dark CLI + 5 new interactive Plotly charts) |
+| Monte Carlo Paths | 200 per run |
+| Paid APIs Required | 0 |
 
 ---
 
@@ -46,9 +61,9 @@ flowchart TD
     G2 --> H
     G3 --> H
 
-    style A fill:#2563EB,color:#fff
-    style H fill:#059669,color:#fff
-    style D fill:#D97706,color:#fff
+    style A fill:#3B82F6,color:#fff
+    style H fill:#10B981,color:#fff
+    style D fill:#F59E0B,color:#fff
 ```
 
 ---
@@ -334,17 +349,17 @@ Additional learned layers:
 
 | Tab | What You Get |
 |-----|-------------|
-| **1. Rankings** | Top-3 pick cards with signal + conviction + earnings badges; full rankings table; per-stock detail panel with candlestick, news, valuation, risk |
-| **2. Valuation** | 4-method matrix; entry positioning chart; DCF sensitivity Bear/Base/Bull |
-| **3. Risk & Quality** | Risk metrics table; Sharpe vs ROIC bubble scatter; Piotroski bar chart |
+| **1. Rankings** | Top-3 pick cards with signal + conviction + earnings badges; full rankings table; **factor radar chart** (7-factor fingerprint, top-5); **score distribution histogram** (portfolio vs universe); per-stock detail panel |
+| **2. Valuation** | 4-method matrix; entry positioning chart; DCF sensitivity Bear/Base/Bull table; **DCF scenario waterfall chart** (grouped Bear/Base/Bull bars with current price) |
+| **3. Risk & Quality** | Risk metrics table; Sharpe vs ROIC bubble scatter; Piotroski bar chart; **Monte Carlo portfolio simulation** (200 paths, 252 days, P5/P25/P75/P95 bands) |
 | **4. Protocol Gates** | 10×7 gate heatmap; protocol summary with pass/warn/fail |
 | **5. Portfolio** | Donut allocation chart; position breakdown with Kelly weights |
-| **6. Macro & Performance** | VIX + yield tiles; sector ETF bar chart; normalised price history vs S&P 500; correlation heatmap |
+| **6. Macro & Performance** | VIX + yield tiles; sector ETF bar chart; normalised price history vs S&P 500; correlation heatmap; **yield curve chart** (3M/2Y/10Y — red fill if inverted) |
 | **7. Stock Lookup** | Search any ticker — full fresh analysis with candlestick, valuation, risk, news, protocol |
 | **8. History** | Past sessions with per-pick cards · factor score bars · entry/exit P&L · "📊 Open Full Analysis" time-machine view |
 | **9. Backtest** | Portfolio-wide equity curve vs S&P 500 · 5 aggregate tiles · per-stock breakdown |
 | **10. Calendar** | Earnings timeline sorted by urgency (≤7d RED · ≤14d AMBER · ≤30d BLUE) · Wall Street-style quant recommendation per stock · Bear/Base/Bull targets |
-| **⚙️ Settings** | Theme switcher (Light/Warm/Cool/Mint) · CSV/JSON export · behaviour sliders (penalty, memory, learning rate, signal mode) |
+| **⚙️ Settings** | Theme switcher (**Terminal** / Dark / Light / Warm) · CSV/JSON export · behaviour sliders (penalty, memory, learning rate, signal mode) |
 
 ---
 
@@ -440,7 +455,7 @@ portfolio/
 ├── .env                      ← Your API keys (never committed — in .gitignore)
 ├── .env.example              ← Key template (committed, no values)
 ├── .streamlit/
-│   └── config.toml           ← Streamlit theme (white bg, black text, blue accent)
+│   └── config.toml           ← Wall Street terminal theme (dark bg · neon green/red)
 ├── advisor/
 │   ├── collector.py          ← 8-question investor profile builder
 │   ├── fetcher.py            ← yfinance + yfinance-extended + Stooq fallback

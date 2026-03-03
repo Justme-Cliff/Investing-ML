@@ -42,21 +42,21 @@ from advisor.news_fetcher import NewsFetcher
 # ─────────────────────────────────────────────────────────────────────────────
 # COLOUR CONSTANTS
 # ─────────────────────────────────────────────────────────────────────────────
-BLUE       = "#2563EB"
-BLUE_LT    = "#EFF6FF"
-GREEN      = "#059669"
-GREEN_LT   = "#ECFDF5"
-AMBER      = "#D97706"
-AMBER_LT   = "#FFFBEB"
-RED        = "#DC2626"
-RED_LT     = "#FEF2F2"
-ORANGE     = "#EA580C"
-ORANGE_LT  = "#FFF7ED"
-TEXT       = "#111827"
-MUTED      = "#6B7280"
-MUTED2     = "#9CA3AF"
-BORDER     = "#E5E7EB"
-GRAY_LT    = "#F9FAFB"
+BLUE       = "#3B82F6"
+BLUE_LT    = "#1E3A5F"
+GREEN      = "#10B981"
+GREEN_LT   = "#064E3B"
+AMBER      = "#F59E0B"
+AMBER_LT   = "#451A03"
+RED        = "#EF4444"
+RED_LT     = "#450A0A"
+ORANGE     = "#F97316"
+ORANGE_LT  = "#431407"
+TEXT       = "#E2E8F0"
+MUTED      = "#94A3B8"
+MUTED2     = "#64748B"
+BORDER     = "#1E2535"
+GRAY_LT    = "#0D1117"
 
 FACTOR_COLORS = ["#3B82F6","#10B981","#F59E0B","#EF4444","#8B5CF6","#06B6D4","#84CC16"]
 
@@ -101,14 +101,14 @@ ZONE_META = {
 SETTINGS_FILE = os.path.join("memory", "settings.json")
 
 THEMES = {
-    "Light":  {"bg": "#FFFFFF", "sidebar": "#FFFFFF", "accent": "#2563EB"},
-    "Warm":   {"bg": "#FFFBF5", "sidebar": "#FFF3E0", "accent": "#D97706"},
-    "Cool":   {"bg": "#F0F4FF", "sidebar": "#EEF2FF", "accent": "#6366F1"},
-    "Mint":   {"bg": "#F0FDF4", "sidebar": "#DCFCE7", "accent": "#059669"},
+    "Terminal": {"bg": "#060A10", "sidebar": "#0A0D14", "accent": "#3B82F6"},
+    "Dark":     {"bg": "#0F172A", "sidebar": "#1E293B", "accent": "#818CF8"},
+    "Light":    {"bg": "#FFFFFF", "sidebar": "#F8FAFC", "accent": "#2563EB"},
+    "Warm":     {"bg": "#FFFBF5", "sidebar": "#FFF3E0", "accent": "#D97706"},
 }
 
 DEFAULT_SETTINGS = {
-    "theme":          "Light",
+    "theme":          "Terminal",
     "fresh_penalty":  22,
     "n_sessions":     2,
     "learning_rate":  0.04,
@@ -138,11 +138,65 @@ def _save_settings(s: dict):
 
 def _apply_theme_css():
     """Inject per-session CSS overrides based on active theme."""
-    s      = st.session_state.get("settings", DEFAULT_SETTINGS)
-    t      = THEMES.get(s.get("theme", "Light"), THEMES["Light"])
+    s          = st.session_state.get("settings", DEFAULT_SETTINGS)
+    theme_name = s.get("theme", "Terminal")
+    t          = THEMES.get(theme_name, THEMES["Terminal"])
     bg     = t["bg"]
     sb     = t["sidebar"]
     accent = t["accent"]
+    is_dark = theme_name in ("Terminal", "Dark")
+
+    if is_dark:
+        extra = (
+            f".mtile{{background:#0F1520!important;border-color:#1E2535!important}}"
+            f".pick-card{{background:#0A0D14!important;border-color:#1E2535!important}}"
+            f".feature-card{{background:#0A0D14!important;border-color:#1E2535!important}}"
+            f".qt th{{background:#0F1520!important;color:#94A3B8!important;"
+            f"border-bottom:2px solid #1E2535!important}}"
+            f".qt td{{color:#E2E8F0!important;border-bottom:1px solid #1E2535!important}}"
+            f".qt tbody tr:hover td{{background:#1E2535!important}}"
+            f".sbar-wrap{{background:#1E2535!important}}"
+            f".shdr{{color:#E2E8F0!important}}"
+            f".ssub{{color:#64748B!important}}"
+            f".sb-brand{{color:#E2E8F0!important}}"
+            f".fc-title{{color:#E2E8F0!important}}"
+            f".fc-desc{{color:#94A3B8!important}}"
+            f".hero-title{{color:#E2E8F0!important}}"
+            f".hero-sub{{color:#94A3B8!important}}"
+            f".ptitle{{color:#E2E8F0!important}}"
+            f".stTabs [data-baseweb='tab-list']{{border-bottom:2px solid #1E2535!important}}"
+            f".stTabs [data-baseweb='tab']{{color:#64748B!important}}"
+            f".stTabs [aria-selected='true']{{color:#E2E8F0!important}}"
+            f"[data-testid='stSidebar'] label{{color:#94A3B8!important}}"
+            f"[data-testid='stSidebar'] p{{color:#E2E8F0!important}}"
+            f"[data-testid='stSidebar'] .stSelectbox label{{color:#94A3B8!important}}"
+            f"[data-testid='stMetricLabel']{{color:#94A3B8!important}}"
+            f"[data-testid='stMetricValue']{{color:#E2E8F0!important}}"
+        )
+    else:
+        extra = (
+            f".mtile{{background:#FFFFFF!important;border-color:#E5E7EB!important}}"
+            f".pick-card{{background:#FFFFFF!important;border-color:#E5E7EB!important}}"
+            f".feature-card{{background:#FFFFFF!important;border-color:#E5E7EB!important}}"
+            f".qt th{{background:#F9FAFB!important;color:#374151!important;"
+            f"border-bottom:2px solid #E5E7EB!important}}"
+            f".qt td{{color:#111827!important;border-bottom:1px solid #F3F4F6!important}}"
+            f".qt tbody tr:hover td{{background:#F0F7FF!important}}"
+            f".sbar-wrap{{background:#F3F4F6!important}}"
+            f".shdr{{color:#111827!important}}"
+            f".ssub{{color:#9CA3AF!important}}"
+            f".sb-brand{{color:#111827!important}}"
+            f".fc-title{{color:#111827!important}}"
+            f".fc-desc{{color:#6B7280!important}}"
+            f".hero-title{{color:#111827!important}}"
+            f".hero-sub{{color:#6B7280!important}}"
+            f".ptitle{{color:#111827!important}}"
+            f".stTabs [data-baseweb='tab-list']{{border-bottom:2px solid #E5E7EB!important}}"
+            f".stTabs [data-baseweb='tab']{{color:#9CA3AF!important}}"
+            f".stTabs [aria-selected='true']{{color:#111827!important}}"
+            f"[data-testid='stSidebar'] label{{color:#374151!important}}"
+        )
+
     st.markdown(
         f"<style>"
         f".main,.main .block-container{{background-color:{bg}!important}}"
@@ -151,6 +205,7 @@ def _apply_theme_css():
         f".stButton>button[kind='primary']{{background:{accent}!important;"
         f"border-color:{accent}!important}}"
         f".stButton>button[kind='primary']:hover{{opacity:.88}}"
+        f"{extra}"
         f"</style>",
         unsafe_allow_html=True,
     )
@@ -161,8 +216,8 @@ def _apply_theme_css():
 # ─────────────────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Google Font ─────────────────────────────────────────────────────── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+/* ── Google Fonts ────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 /* ── Base ────────────────────────────────────────────────────────────── */
 html, body, [class*="css"] {
@@ -178,14 +233,14 @@ html, body, [class*="css"] {
 
 /* ── Sidebar ─────────────────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #FFFFFF;
-    border-right: 1px solid #E5E7EB;
+    background: #0A0D14;
+    border-right: 1px solid #1E2535;
 }
 [data-testid="stSidebar"] .block-container { padding-top: 1.4rem; }
 [data-testid="stSidebar"] label {
     font-size: 12px !important;
     font-weight: 600 !important;
-    color: #374151 !important;
+    color: #94A3B8 !important;
     letter-spacing: .01em;
 }
 
@@ -193,7 +248,7 @@ html, body, [class*="css"] {
 .stTabs [data-baseweb="tab-list"] {
     gap: 0;
     background: transparent;
-    border-bottom: 2px solid #E5E7EB;
+    border-bottom: 2px solid #1E2535;
     padding: 0;
     margin-bottom: 24px;
 }
@@ -202,17 +257,17 @@ html, body, [class*="css"] {
     padding: 10px 24px;
     font-size: 13px;
     font-weight: 500;
-    color: #9CA3AF;
+    color: #64748B;
     border-bottom: 2px solid transparent;
     margin-bottom: -2px;
     background: transparent !important;
     transition: color .15s ease;
 }
-.stTabs [data-baseweb="tab"]:hover { color: #374151 !important; }
+.stTabs [data-baseweb="tab"]:hover { color: #94A3B8 !important; }
 .stTabs [aria-selected="true"] {
-    color: #111827 !important;
+    color: #E2E8F0 !important;
     font-weight: 700 !important;
-    border-bottom: 2px solid #2563EB !important;
+    border-bottom: 2px solid #3B82F6 !important;
     box-shadow: none !important;
     background: transparent !important;
 }
@@ -227,19 +282,23 @@ html, body, [class*="css"] {
     from { opacity: 0; transform: translateY(10px); }
     to   { opacity: 1; transform: translateY(0); }
 }
+@keyframes terminalBlink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
 
 /* ── Metric tile — with left accent border ───────────────────────────── */
 .mtile {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-left: 3px solid var(--accent, #E5E7EB);
+    background: #0F1520;
+    border: 1px solid #1E2535;
+    border-left: 3px solid var(--accent, #1E2535);
     border-radius: 10px;
     padding: 16px 18px;
     height: 100%;
     transition: box-shadow .2s ease, transform .2s ease;
 }
 .mtile:hover {
-    box-shadow: 0 4px 18px rgba(0,0,0,.07);
+    box-shadow: 0 4px 18px rgba(59,130,246,.12);
     transform: translateY(-1px);
 }
 .mtile-lbl {
@@ -247,7 +306,7 @@ html, body, [class*="css"] {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .1em;
-    color: #9CA3AF;
+    color: #64748B;
     margin-bottom: 8px;
 }
 .mtile-val {
@@ -255,10 +314,11 @@ html, body, [class*="css"] {
     font-weight: 800;
     line-height: 1.15;
     font-variant-numeric: tabular-nums;
+    font-family: "JetBrains Mono", monospace;
 }
 .mtile-sub {
     font-size: 11px;
-    color: #9CA3AF;
+    color: #64748B;
     margin-top: 5px;
     line-height: 1.4;
 }
@@ -288,26 +348,26 @@ html, body, [class*="css"] {
 /* ── Table ───────────────────────────────────────────────────────────── */
 .qt { width: 100%; border-collapse: collapse; font-size: 13px; }
 .qt th {
-    background: #F9FAFB;
-    color: #374151;
+    background: #0F1520;
+    color: #94A3B8;
     font-weight: 600;
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: .08em;
     padding: 10px 14px;
-    border-bottom: 2px solid #E5E7EB;
+    border-bottom: 2px solid #1E2535;
     text-align: left;
     white-space: nowrap;
 }
 .qt td {
     padding: 10px 14px;
-    border-bottom: 1px solid #F3F4F6;
-    color: #111827;
+    border-bottom: 1px solid #1E2535;
+    color: #E2E8F0;
     vertical-align: middle;
 }
 .qt tr:last-child td { border-bottom: none; }
 .qt tbody tr { transition: background .1s ease; }
-.qt tbody tr:hover td { background: #F0F7FF; }
+.qt tbody tr:hover td { background: #1E2535; }
 
 /* ── Rank chip ───────────────────────────────────────────────────────── */
 .rank {
@@ -317,7 +377,7 @@ html, body, [class*="css"] {
     width: 24px;
     height: 24px;
     border-radius: 6px;
-    background: #1E3A8A;
+    background: #3B82F6;
     color: #fff;
     font-size: 10.5px;
     font-weight: 800;
@@ -325,7 +385,7 @@ html, body, [class*="css"] {
 
 /* ── Animated score bar ──────────────────────────────────────────────── */
 .sbar-wrap {
-    background: #F3F4F6;
+    background: #1E2535;
     border-radius: 4px;
     height: 5px;
     overflow: hidden;
@@ -342,17 +402,17 @@ html, body, [class*="css"] {
 .shdr {
     font-size: 14px;
     font-weight: 700;
-    color: #111827;
+    color: #E2E8F0;
     letter-spacing: -.01em;
     margin-bottom: 2px;
 }
-.ssub { font-size: 11.5px; color: #9CA3AF; margin-bottom: 14px; }
+.ssub { font-size: 11.5px; color: #64748B; margin-bottom: 14px; }
 
 /* ── Pick card — left border colored by signal ───────────────────────── */
 .pick-card {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-left: 4px solid var(--signal-color, #E5E7EB);
+    background: #0A0D14;
+    border: 1px solid #1E2535;
+    border-left: 4px solid var(--signal-color, #1E2535);
     border-radius: 10px;
     padding: 22px;
     height: 100%;
@@ -361,39 +421,38 @@ html, body, [class*="css"] {
 }
 .pick-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 12px 32px rgba(0,0,0,.09);
+    box-shadow: 0 12px 32px rgba(59,130,246,.15);
 }
 
 /* ── Feature card (welcome page) ─────────────────────────────────────── */
 .feature-card {
-    background: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-top: 3px solid var(--fc, #2563EB);
+    background: #0A0D14;
+    border: 1px solid #1E2535;
+    border-top: 3px solid var(--fc, #3B82F6);
     border-radius: 10px;
     padding: 22px;
-    height: 100%;
     animation: fadeUp .5s ease both;
     transition: transform .18s ease, box-shadow .18s ease;
 }
 .feature-card:hover {
     transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0,0,0,.07);
+    box-shadow: 0 8px 24px rgba(59,130,246,.12);
 }
 .fc-num {
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .12em;
-    color: var(--fc, #2563EB);
+    color: var(--fc, #3B82F6);
     margin-bottom: 10px;
 }
 .fc-title {
     font-size: 14px;
     font-weight: 700;
-    color: #111827;
+    color: #E2E8F0;
     margin-bottom: 7px;
 }
-.fc-desc { font-size: 12px; color: #6B7280; line-height: 1.65; }
+.fc-desc { font-size: 12px; color: #94A3B8; line-height: 1.65; }
 
 /* ── Hero (welcome) ──────────────────────────────────────────────────── */
 .hero { text-align: center; padding: 72px 20px 56px; }
@@ -402,20 +461,20 @@ html, body, [class*="css"] {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: .14em;
-    color: #2563EB;
+    color: #3B82F6;
     margin-bottom: 18px;
 }
 .hero-title {
     font-size: 52px;
     font-weight: 900;
-    color: #111827;
+    color: #E2E8F0;
     letter-spacing: -.045em;
     line-height: 1;
     margin-bottom: 20px;
 }
 .hero-sub {
     font-size: 17px;
-    color: #6B7280;
+    color: #94A3B8;
     max-width: 480px;
     margin: 0 auto 36px;
     line-height: 1.7;
@@ -423,8 +482,8 @@ html, body, [class*="css"] {
 }
 .hero-note {
     font-size: 12px;
-    color: #9CA3AF;
-    border: 1px solid #E5E7EB;
+    color: #64748B;
+    border: 1px solid #1E2535;
     border-radius: 8px;
     display: inline-block;
     padding: 8px 20px;
@@ -434,14 +493,14 @@ html, body, [class*="css"] {
 .ptitle {
     font-size: 22px;
     font-weight: 800;
-    color: #111827;
+    color: #E2E8F0;
     letter-spacing: -.03em;
 }
-.psub { font-size: 12px; color: #9CA3AF; margin-top: 3px; margin-bottom: 20px; }
+.psub { font-size: 12px; color: #64748B; margin-top: 3px; margin-bottom: 20px; }
 
 /* ── Sidebar brand ───────────────────────────────────────────────────── */
-.sb-brand { font-size: 15px; font-weight: 800; color: #111827; letter-spacing: -.02em; }
-.sb-brand-sub { font-size: 11px; color: #9CA3AF; margin-top: 2px; margin-bottom: 16px; }
+.sb-brand { font-size: 15px; font-weight: 800; color: #E2E8F0; letter-spacing: -.02em; }
+.sb-brand-sub { font-size: 11px; color: #64748B; margin-top: 2px; margin-bottom: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -523,12 +582,13 @@ def _stat(label, value, color=TEXT):
     )
 
 def _plotly_base():
-    """Common Plotly layout kwargs."""
+    """Common Plotly layout kwargs — dark terminal theme."""
     return dict(
-        template="plotly_white",
-        font=dict(family="Inter, -apple-system, sans-serif", size=12),
-        plot_bgcolor="#FFFFFF",
-        paper_bgcolor="#FFFFFF",
+        template="plotly_dark",
+        font=dict(family="Inter, -apple-system, sans-serif", size=12, color="#94A3B8"),
+        plot_bgcolor="#0F1520",
+        paper_bgcolor="#0A0D14",
+        margin=dict(l=20, r=20, t=40, b=20),
     )
 
 
@@ -1073,22 +1133,22 @@ def render_welcome():
     """, unsafe_allow_html=True)
 
     features = [
-        ("#2563EB", "01", "7-Factor Scoring",   "12-1 momentum · EV/EBITDA value · Novy-Marx quality · 5-factor technicals"),
+        ("#2563EB", "01", "7-Factor Scoring",   "12-1 momentum · EV/EBITDA value · Novy-Marx quality · technicals"),
         ("#059669", "02", "4-Method Valuation",  "DCF (2-stage) · Graham Number · EV/EBITDA target · FCF yield"),
         ("#D97706", "03", "Full Risk Suite",     "Altman Z · Sharpe · Sortino · Max DD · VaR 95% · ROIC/WACC"),
         ("#7C3AED", "04", "7-Gate Protocol",     "Warren Buffett quality screen — every stock must earn its place"),
     ]
-    cols = st.columns(4)
-    for i, (col, (fc, num, title, desc)) in enumerate(zip(cols, features)):
-        with col:
-            st.markdown(
-                f'<div class="feature-card" style="--fc:{fc};animation-delay:{i*0.08}s">'
-                f'<div class="fc-num">{num}</div>'
-                f'<div class="fc-title">{title}</div>'
-                f'<div class="fc-desc">{desc}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+    cards_html = '<div style="display:flex;gap:16px;align-items:stretch;">'
+    for i, (fc, num, title, desc) in enumerate(features):
+        cards_html += (
+            f'<div class="feature-card" style="--fc:{fc};animation-delay:{i*0.08}s;flex:1;">'
+            f'<div class="fc-num">{num}</div>'
+            f'<div class="fc-title">{title}</div>'
+            f'<div class="fc-desc">{desc}</div>'
+            f'</div>'
+        )
+    cards_html += '</div>'
+    st.markdown(cards_html, unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1149,7 +1209,7 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
         # Earnings badge
         if days_away is not None and days_away <= 30:
             earn_c  = RED   if days_away <= 7  else AMBER if days_away <= 14 else MUTED
-            earn_bg = "#FEF2F2" if days_away <= 7 else "#FFFBEB" if days_away <= 14 else GRAY_LT
+            earn_bg = RED_LT if days_away <= 7 else AMBER_LT if days_away <= 14 else GRAY_LT
             earn_badge = (f'<span class="badge" style="color:{earn_c};background:{earn_bg};'
                           f'font-size:9px">EARNINGS {days_away}d</span>')
         else:
@@ -1185,7 +1245,7 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
                 f'{sbar(sc)}'
 
                 # Divider
-                f'<div style="height:1px;background:#F3F4F6;margin:16px 0"></div>'
+                f'<div style="height:1px;background:#1E2535;margin:16px 0"></div>'
 
                 # Stats grid
                 f'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">'
@@ -1288,10 +1348,26 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
         legend=dict(orientation="h", yanchor="bottom", y=1.02,
                     xanchor="left", x=0, font=dict(size=11)),
         xaxis=dict(title="Weighted Score Contribution (0–100)", range=[0, 108],
-                   gridcolor="#F3F4F6"),
-        yaxis=dict(tickfont=dict(size=12, family="monospace"), gridcolor="#F3F4F6"),
+                   gridcolor="#1E2535"),
+        yaxis=dict(tickfont=dict(size=12, family="monospace"), gridcolor="#1E2535"),
     )
     st.plotly_chart(fig, use_container_width=True)
+
+    # ── Factor radar + score distribution ─────────────────────────────────────
+    col_rad, col_hist = st.columns([1, 1])
+    with col_rad:
+        st.markdown(shdr("Factor Fingerprint", "Top-5 picks — 7-factor radar chart"),
+                    unsafe_allow_html=True)
+        ranked_df = st.session_state.results.get("ranked_df", pd.DataFrame())
+        st.plotly_chart(_factor_radar_chart(top10), use_container_width=True)
+    with col_hist:
+        st.markdown(shdr("Score Distribution", "Portfolio picks vs full universe"),
+                    unsafe_allow_html=True)
+        ranked_df = st.session_state.results.get("ranked_df", pd.DataFrame())
+        if not ranked_df.empty:
+            st.plotly_chart(_score_distribution_chart(ranked_df, top10), use_container_width=True)
+        else:
+            st.caption("Score distribution not available.")
 
     # ── Quick-select ticker buttons ────────────────────────────────────────────
     st.markdown(
@@ -1420,7 +1496,7 @@ def tab_valuation(top10, valuation):
             fig.add_vrect(x0=x0, x1=x1, fillcolor=fill, line_width=0)
             fig.add_annotation(x=lx, y=len(tickers)-0.3, text=label,
                                showarrow=False, font=dict(size=9, color="#9CA3AF"), yref="y")
-        fig.add_vline(x=0, line_dash="dash", line_color="#D1D5DB", line_width=1.2)
+        fig.add_vline(x=0, line_dash="dash", line_color="#1E2535", line_width=1.2)
         fig.add_vline(x=-20, line_dash="dot", line_color=GREEN, line_width=1)
         fig.add_trace(go.Bar(
             x=prems, y=tickers, orientation="h",
@@ -1433,7 +1509,7 @@ def tab_valuation(top10, valuation):
             **_plotly_base(), height=370,
             margin=dict(l=0, r=80, t=6, b=36),
             xaxis=dict(title="% vs Fair Value", range=[-47, 58],
-                       zeroline=True, zerolinecolor="#D1D5DB", gridcolor="#F3F4F6"),
+                       zeroline=True, zerolinecolor="#1E2535", gridcolor="#1E2535"),
             yaxis=dict(tickfont=dict(size=12, family="monospace"), autorange="reversed"),
             showlegend=False,
         )
@@ -1454,7 +1530,7 @@ def tab_valuation(top10, valuation):
             fig2.add_trace(go.Scatter(
                 x=tickers, y=vals, mode="markers", name=mn,
                 marker=dict(size=11, color=FACTOR_COLORS[mi], symbol="circle",
-                            line=dict(width=1.5, color="white")),
+                            line=dict(width=1.5, color="#0A0D14")),
                 hovertemplate=f"<b>{mn}</b>: $%{{y:,.0f}}<extra></extra>",
             ))
         fvs = [valuation.get(t, {}).get("fair_value") for t in tickers]
@@ -1468,7 +1544,7 @@ def tab_valuation(top10, valuation):
             **_plotly_base(), height=370,
             margin=dict(l=0, r=0, t=6, b=36),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=10)),
-            yaxis=dict(title="Price ($)", tickformat="$,.0f", gridcolor="#F3F4F6"),
+            yaxis=dict(title="Price ($)", tickformat="$,.0f", gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=10, family="monospace")),
         )
         st.plotly_chart(fig2, use_container_width=True)
@@ -1495,7 +1571,7 @@ def tab_valuation(top10, valuation):
             prem = sv.get("premium_pct")
             c_s, bg_s, lbl_s = SIGNAL_META.get(sig, (MUTED, GRAY_LT, sig))
             p_clr = RED if (prem or 0) > 5 else GREEN if (prem or 0) < -10 else AMBER
-            row_bg = "#FFFBEB" if sname == "Base" else "#FFFFFF"
+            row_bg = "#1A1500" if sname == "Base" else "#0A0D14"
             sens_rows += (
                 f'<tr style="background:{row_bg}">'
                 f'<td><b>{t}</b></td>'
@@ -1518,11 +1594,17 @@ def tab_valuation(top10, valuation):
     else:
         st.caption("Sensitivity data not available (requires free cash flow data).")
 
+    # ── DCF Scenario Waterfall ─────────────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown(shdr("DCF Scenario Comparison", "Bear / Base / Bull fair values vs current price (dashed)"),
+                unsafe_allow_html=True)
+    st.plotly_chart(_dcf_waterfall_chart(top10, valuation), use_container_width=True)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TAB 3 — RISK & QUALITY
 # ─────────────────────────────────────────────────────────────────────────────
-def tab_risk(top10, risk):
+def tab_risk(top10, risk, universe_data=None):
     st.markdown(
         shdr("Risk & Quality Metrics",
              "Altman Z · Sharpe · Sortino · Max Drawdown · VaR 95% · ROIC/WACC · Piotroski"),
@@ -1597,7 +1679,7 @@ def tab_risk(top10, risk):
             text=texts, textposition="top center",
             textfont=dict(size=10, family="monospace"),
             marker=dict(size=szs, color=dot_clrs, opacity=0.85,
-                        line=dict(width=1.5, color="white")),
+                        line=dict(width=1.5, color="#0A0D14")),
             hovertemplate="<b>%{text}</b><br>Sharpe: %{x:.2f}<br>ROIC/WACC: %{y:+.1f}%<extra></extra>",
         ))
         fig.add_hline(y=0, line_dash="dash", line_color="#E5E7EB", line_width=1)
@@ -1609,8 +1691,8 @@ def tab_risk(top10, risk):
         fig.update_layout(
             **_plotly_base(), height=340,
             margin=dict(l=0, r=0, t=6, b=40),
-            xaxis=dict(title="Sharpe Ratio", gridcolor="#F3F4F6"),
-            yaxis=dict(title="ROIC / WACC Spread (%)", gridcolor="#F3F4F6"),
+            xaxis=dict(title="Sharpe Ratio", gridcolor="#1E2535"),
+            yaxis=dict(title="ROIC / WACC Spread (%)", gridcolor="#1E2535"),
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -1640,10 +1722,18 @@ def tab_risk(top10, risk):
         fig2.update_layout(
             **_plotly_base(), height=340,
             margin=dict(l=0, r=70, t=6, b=40),
-            yaxis=dict(range=[0, 11], title="Score / 9", gridcolor="#F3F4F6"),
+            yaxis=dict(range=[0, 11], title="Score / 9", gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=11, family="monospace")),
         )
         st.plotly_chart(fig2, use_container_width=True)
+
+    # ── Monte Carlo ────────────────────────────────────────────────────────────
+    if universe_data:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(shdr("Monte Carlo Portfolio Simulation",
+                         "200 paths · 252 trading days · Equal-weighted top-10"),
+                    unsafe_allow_html=True)
+        st.plotly_chart(_monte_carlo_chart(top10, universe_data), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1667,8 +1757,8 @@ def tab_protocol(top10, protocol):
         text_matrix.append([f"{float(g):.0f}" for g in gates[:7]])
 
     colorscale = [
-        [0.00, "#FEF2F2"], [0.35, "#FEF3C7"],
-        [0.60, "#ECFDF5"], [1.00, "#065F46"],
+        [0.00, "#450A0A"], [0.35, "#451A03"],
+        [0.60, "#064E3B"], [1.00, "#10B981"],
     ]
     fig = go.Figure(go.Heatmap(
         z=gate_matrix, x=GATE_SHORT, y=tickers,
@@ -1786,7 +1876,7 @@ def tab_portfolio(top10, profile):
             sec = row.get("sector", "—")
             sc  = SECTOR_COLORS.get(sec, "#9CA3AF")
             bar = (
-                f'<div style="background:#F3F4F6;border-radius:3px;height:5px;width:100%">'
+                f'<div style="background:#1E2535;border-radius:3px;height:5px;width:100%">'
                 f'<div style="background:{sc};height:5px;border-radius:3px;width:{w*100:.0f}%"></div></div>'
             )
             rows += (
@@ -1830,7 +1920,7 @@ def tab_portfolio(top10, profile):
             margin=dict(l=0, r=0, t=6, b=36),
             yaxis=dict(title="Weight (%)",
                        range=[0, max((top10["weight"]*100).tolist() or [20]) * 1.25],
-                       gridcolor="#F3F4F6"),
+                       gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=11, family="monospace")),
         )
         st.plotly_chart(fig2, use_container_width=True)
@@ -1879,7 +1969,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
             fig_etf.update_layout(
                 **_plotly_base(), height=290,
                 margin=dict(l=0, r=60, t=0, b=30),
-                xaxis=dict(zeroline=True, zerolinecolor="#D1D5DB", gridcolor="#F3F4F6"),
+                xaxis=dict(zeroline=True, zerolinecolor="#1E2535", gridcolor="#1E2535"),
                 showlegend=False,
             )
             st.plotly_chart(fig_etf, use_container_width=True)
@@ -1926,8 +2016,8 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
             margin=dict(l=0, r=0, t=6, b=40),
             legend=dict(font=dict(size=10), orientation="v",
                         yanchor="top", y=1, xanchor="left", x=1.01),
-            xaxis=dict(title="Date", gridcolor="#F3F4F6"),
-            yaxis=dict(title="Normalised (Base = 100)", gridcolor="#F3F4F6"),
+            xaxis=dict(title="Date", gridcolor="#1E2535"),
+            yaxis=dict(title="Normalised (Base = 100)", gridcolor="#1E2535"),
         )
         st.plotly_chart(fig_perf, use_container_width=True)
 
@@ -1952,7 +2042,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
             fig_corr = go.Figure(go.Heatmap(
                 z=corr_mat.values, x=tks, y=tks,
                 text=txt_m, texttemplate="%{text}",
-                colorscale=[[0, "#F0FDF4"], [0.5, "#93C5FD"], [1, "#1D4ED8"]],
+                colorscale=[[0, "#0F1520"], [0.5, "#1E3A5F"], [1, "#3B82F6"]],
                 zmin=0, zmax=1,
                 hovertemplate="<b>%{y} vs %{x}</b><br>Correlation: %{z:.2f}<extra></extra>",
                 colorbar=dict(thickness=14, len=0.85),
@@ -1964,6 +2054,12 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
                 yaxis=dict(tickfont=dict(size=10, family="monospace"), autorange="reversed"),
             )
             st.plotly_chart(fig_corr, use_container_width=True)
+
+        # ── Yield Curve ────────────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(shdr("Yield Curve", "3M · 2Y · 10Y  ·  Red fill = inverted curve"),
+                    unsafe_allow_html=True)
+        st.plotly_chart(_yield_curve_chart(macro), use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2047,12 +2143,280 @@ def _candlestick_fig(ticker: str, hist: pd.DataFrame, period: str = "1y") -> go.
         margin=dict(l=0, r=0, t=36, b=0),
     )
     fig.update_yaxes(title_text="Price ($)", row=1, col=1,
-                     gridcolor="#F3F4F6", tickformat="$,.2f")
+                     gridcolor="#1E2535", tickformat="$,.2f")
     fig.update_yaxes(title_text="Volume",   row=2, col=1,
-                     gridcolor="#F3F4F6", showticklabels=False)
+                     gridcolor="#1E2535", showticklabels=False)
     fig.update_yaxes(title_text="RSI",      row=3, col=1,
-                     gridcolor="#F3F4F6", range=[0, 100])
-    fig.update_xaxes(gridcolor="#F3F4F6", row=3, col=1)
+                     gridcolor="#1E2535", range=[0, 100])
+    fig.update_xaxes(gridcolor="#1E2535", row=3, col=1)
+    return fig
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QUANT CHARTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _factor_radar_chart(top10: pd.DataFrame) -> go.Figure:
+    """Spider/radar chart showing each pick's 7-factor fingerprint."""
+    factor_cols = [f"{f}_score" for f in FACTOR_NAMES]
+    factor_labels = [f.capitalize() for f in FACTOR_NAMES]
+    neon = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4", "#F97316"]
+    fig = go.Figure()
+    for i, (_, row) in enumerate(top10.head(5).iterrows()):
+        vals = [float(row.get(c, 50) or 50) for c in factor_cols]
+        vals_closed = vals + [vals[0]]
+        labels_closed = factor_labels + [factor_labels[0]]
+        color = neon[i % len(neon)]
+        fig.add_trace(go.Scatterpolar(
+            r=vals_closed,
+            theta=labels_closed,
+            fill="toself",
+            name=row["ticker"],
+            line=dict(color=color, width=2),
+            fillcolor=color.replace(")", ", 0.10)").replace("rgb", "rgba") if color.startswith("rgb") else color + "1A",
+            opacity=0.85,
+            hovertemplate="<b>" + row["ticker"] + "</b> — %{theta}<br>Score: %{r:.1f}<extra></extra>",
+        ))
+    fig.update_layout(
+        **_plotly_base(),
+        height=420,
+        polar=dict(
+            bgcolor="#0F1520",
+            radialaxis=dict(visible=True, range=[0, 100], color="#64748B",
+                            gridcolor="#1E2535", tickfont=dict(size=9, color="#64748B")),
+            angularaxis=dict(color="#94A3B8", gridcolor="#1E2535",
+                             tickfont=dict(size=11, color="#94A3B8")),
+        ),
+        legend=dict(orientation="v", x=1.05, font=dict(size=11),
+                    bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=60, r=120, t=40, b=40),
+    )
+    return fig
+
+
+def _score_distribution_chart(ranked_df: pd.DataFrame, top10: pd.DataFrame) -> go.Figure:
+    """Histogram of composite scores across all ranked stocks; marks portfolio picks."""
+    if "composite_score" not in ranked_df.columns:
+        return go.Figure()
+    all_scores = ranked_df["composite_score"].dropna().tolist()
+    top_scores = top10["composite_score"].dropna().tolist() if "composite_score" in top10.columns else []
+    top_tickers = top10["ticker"].tolist() if not top10.empty else []
+
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=all_scores, nbinsx=40, name="All Stocks",
+        marker=dict(color="#1E3A5F", line=dict(color="#3B82F6", width=0.5)),
+        opacity=0.8,
+        hovertemplate="Score range: %{x}<br>Count: %{y}<extra></extra>",
+    ))
+    for sc, tk in zip(top_scores, top_tickers):
+        fig.add_vline(
+            x=sc, line_dash="dash", line_color="#10B981", line_width=1.5,
+            annotation=dict(text=tk, font=dict(size=9, color="#10B981"),
+                            bgcolor="#064E3B", borderpad=2),
+            annotation_position="top",
+        )
+    fig.update_layout(
+        **_plotly_base(),
+        height=300,
+        bargap=0.05,
+        xaxis=dict(title="Composite Score (0–100)", range=[0, 100], gridcolor="#1E2535"),
+        yaxis=dict(title="# Stocks", gridcolor="#1E2535"),
+        showlegend=False,
+        margin=dict(l=20, r=20, t=40, b=40),
+    )
+    return fig
+
+
+def _monte_carlo_chart(top10: pd.DataFrame, universe_data: dict, n_sims: int = 200) -> go.Figure:
+    """200-path Monte Carlo simulation of equal-weighted portfolio over 252 days."""
+    np.random.seed(42)
+    daily_stats = []
+    for _, row in top10.iterrows():
+        t = row["ticker"]
+        if t not in universe_data:
+            continue
+        hist = universe_data[t].get("history", pd.DataFrame())
+        if hist.empty or "Close" not in hist.columns:
+            continue
+        close = DataFetcher.strip_tz(hist["Close"].dropna())
+        if len(close) < 30:
+            continue
+        ret = close.pct_change().dropna()
+        daily_stats.append((float(ret.mean()), float(ret.std())))
+    if not daily_stats:
+        return go.Figure()
+
+    days = 252
+    paths = np.ones((n_sims, days + 1))
+    for mu, sigma in daily_stats:
+        draws = np.random.normal(mu, sigma, (n_sims, days))
+        paths *= (1 + draws)
+    paths = paths ** (1 / len(daily_stats))  # geometric mean per stock
+    x = list(range(days + 1))
+
+    pcts = np.percentile(paths, [5, 25, 50, 75, 95], axis=0)
+    fig = go.Figure()
+
+    # Dim paths
+    for i in range(min(n_sims, 80)):
+        fig.add_trace(go.Scatter(
+            x=x, y=paths[i], mode="lines",
+            line=dict(color="#1E2535", width=0.5), showlegend=False, opacity=0.4,
+            hoverinfo="skip",
+        ))
+
+    band_colors = ["#064E3B", "#065F46", "#059669", "#047857", "#064E3B"]
+    band_labels = ["P5–P25 (Worst Quartile)", None, None, "P75–P95 (Best Quartile)", None]
+    for lo, hi, clr, lbl in [
+        (0, 1, "#450A0A", "P5 (Worst 5%)"),
+        (1, 2, "#064E3B", "P25–P75 (Median Range)"),
+        (3, 4, "#1E3A5F", "P95 (Best 5%)"),
+    ]:
+        fig.add_trace(go.Scatter(
+            x=x + x[::-1],
+            y=list(pcts[hi]) + list(pcts[lo])[::-1],
+            fill="toself", mode="none",
+            fillcolor=clr + "55", name=lbl,
+            hoverinfo="skip",
+        ))
+
+    # Median
+    fig.add_trace(go.Scatter(
+        x=x, y=pcts[2], mode="lines", name="Median",
+        line=dict(color="#10B981", width=2.5),
+        hovertemplate="Day %{x}<br>Portfolio: %{y:.2f}×<extra></extra>",
+    ))
+    # Breakeven
+    fig.add_hline(y=1.0, line_dash="dot", line_color="#EF4444", line_width=1,
+                  annotation_text="Breakeven", annotation_font=dict(color="#EF4444", size=10))
+
+    # Annotations
+    med_final = float(pcts[2, -1])
+    p5_final  = float(pcts[0, -1])
+    p95_final = float(pcts[4, -1])
+    fig.add_annotation(x=days, y=med_final, text=f"Median: {med_final:.2f}×",
+                       showarrow=False, xanchor="left", font=dict(color="#10B981", size=10))
+    fig.add_annotation(x=days, y=p5_final, text=f"P5: {p5_final:.2f}×",
+                       showarrow=False, xanchor="left", font=dict(color="#EF4444", size=9))
+    fig.add_annotation(x=days, y=p95_final, text=f"P95: {p95_final:.2f}×",
+                       showarrow=False, xanchor="left", font=dict(color="#3B82F6", size=9))
+
+    fig.update_layout(
+        **_plotly_base(),
+        height=420,
+        xaxis=dict(title="Trading Days", gridcolor="#1E2535"),
+        yaxis=dict(title="Portfolio Multiplier (1.0 = start)", gridcolor="#1E2535"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=10),
+                    bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=20, r=80, t=50, b=40),
+    )
+    return fig
+
+
+def _dcf_waterfall_chart(top10: pd.DataFrame, valuation: dict) -> go.Figure:
+    """Bear / Base / Bull DCF fair value grouped bar chart with current price overlay."""
+    tickers = top10["ticker"].tolist()
+    scenarios = ["Bear", "Base", "Bull"]
+    scenario_colors = [RED, AMBER, GREEN]
+
+    fig = go.Figure()
+    for sname, scolor in zip(scenarios, scenario_colors):
+        fvs = []
+        for t in tickers:
+            sens = valuation.get(t, {}).get("sensitivity", {})
+            sv = sens.get(sname, {})
+            fvs.append(sv.get("fair_value"))
+        fig.add_trace(go.Bar(
+            x=tickers, y=fvs, name=sname,
+            marker_color=scolor, opacity=0.85,
+            hovertemplate=f"<b>%{{x}}</b> — {sname}<br>FV: $%{{y:,.2f}}<extra></extra>",
+        ))
+
+    # Current price lines per ticker
+    for i, t in enumerate(tickers):
+        cur = valuation.get(t, {}).get("current_price")
+        if cur:
+            fig.add_shape(
+                type="line", xref="x", yref="y",
+                x0=i - 0.4, x1=i + 0.4, y0=cur, y1=cur,
+                line=dict(color="#E2E8F0", width=2, dash="dot"),
+            )
+
+    fig.update_layout(
+        **_plotly_base(),
+        barmode="group",
+        height=380,
+        xaxis=dict(tickfont=dict(size=11, family="monospace"), gridcolor="#1E2535"),
+        yaxis=dict(title="Fair Value ($)", tickformat="$,.0f", gridcolor="#1E2535"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, font=dict(size=11),
+                    bgcolor="rgba(0,0,0,0)"),
+        margin=dict(l=20, r=20, t=50, b=40),
+    )
+    return fig
+
+
+def _yield_curve_chart(macro: dict) -> go.Figure:
+    """Yield curve visualization using available macro data."""
+    y3m  = macro.get("yield_3m")
+    y10  = macro.get("yield_10y")
+    spread = macro.get("yield_10_2_spread")
+
+    # Build best-effort curve from available fields
+    maturities = ["3M", "10Y"]
+    yields_raw = [y3m, y10]
+    labels = ["3M", "10Y"]
+
+    # Estimate 2Y from spread (if available)
+    y2 = None
+    if y10 is not None and spread is not None:
+        y2 = y10 - spread
+
+    if y2 is not None:
+        maturities = ["3M", "2Y", "10Y"]
+        yields_raw = [y3m, y2, y10]
+        labels     = ["3M", "2Y", "10Y"]
+
+    maturities_clean = [m for m, y in zip(maturities, yields_raw) if y is not None]
+    yields_clean     = [y for y in yields_raw if y is not None]
+
+    if len(yields_clean) < 2:
+        fig = go.Figure()
+        fig.update_layout(**_plotly_base(), height=260,
+                          title=dict(text="Yield Curve (insufficient data)", font=dict(size=13, color="#94A3B8")))
+        return fig
+
+    inverted = yields_clean[-1] < yields_clean[0]
+    curve_color = RED if inverted else GREEN
+    fill_color  = "rgba(239,68,68,0.10)" if inverted else "rgba(16,185,129,0.10)"
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=maturities_clean, y=yields_clean,
+        mode="lines+markers",
+        name="Yield Curve",
+        line=dict(color=curve_color, width=2.5),
+        fill="tozeroy",
+        fillcolor=fill_color,
+        marker=dict(size=8, color=curve_color),
+        hovertemplate="%{x}: %{y:.2f}%<extra></extra>",
+    ))
+    if inverted:
+        fig.add_annotation(
+            x=maturities_clean[-1], y=yields_clean[-1],
+            text="⚠ INVERTED",
+            showarrow=False, xanchor="left",
+            font=dict(color=RED, size=12, family="JetBrains Mono"),
+            bgcolor="#450A0A", borderpad=4,
+        )
+    fig.update_layout(
+        **_plotly_base(),
+        height=280,
+        xaxis=dict(title="Maturity", gridcolor="#1E2535"),
+        yaxis=dict(title="Yield (%)", gridcolor="#1E2535", tickformat=".2f"),
+        showlegend=False,
+        margin=dict(l=20, r=20, t=40, b=40),
+    )
     return fig
 
 
@@ -2114,7 +2478,7 @@ def _render_stock_detail(
         website_html = f'<a href="{website}" target="_blank" style="color:{BLUE};text-decoration:none;font-size:12px">{domain}</a>  ·  '
 
     st.markdown(
-        f'<div style="background:linear-gradient(135deg,{GRAY_LT} 0%,#ffffff 100%);'
+        f'<div style="background:linear-gradient(135deg,{GRAY_LT} 0%,#0F1520 100%);'
         f'border:1px solid {BORDER};border-left:5px solid {sig_accent};'
         f'border-radius:12px;padding:22px 26px 18px;margin-bottom:20px">'
         f'  <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">'
@@ -2147,11 +2511,11 @@ def _render_stock_detail(
     edate     = data.get("earnings_date", "")
     if days_away is not None and days_away <= 90:
         if days_away <= 7:
-            earn_c, earn_bg = RED, "#FEF2F2"
+            earn_c, earn_bg = RED, RED_LT
             earn_icon = "⚠"
             earn_msg = f"Earnings in {days_away} days ({edate}) — high event risk, consider waiting for results"
         elif days_away <= 14:
-            earn_c, earn_bg = AMBER, "#FFFBEB"
+            earn_c, earn_bg = AMBER, AMBER_LT
             earn_icon = "!"
             earn_msg = f"Earnings in {days_away} days ({edate}) — elevated risk, size position carefully"
         elif days_away <= 30:
@@ -2184,7 +2548,7 @@ def _render_stock_detail(
     thesis_html = _generate_quant_thesis(ticker, val, r, proto_for_ticker)
     if thesis_html:
         st.markdown(
-            f'<div style="background:#F8FAFF;border:1px solid #DBEAFE;border-left:4px solid {sig_accent};'
+            f'<div style="background:#0A1525;border:1px solid #1E3A5F;border-left:4px solid {sig_accent};'
             f'border-radius:10px;padding:16px 20px;margin-bottom:18px">'
             f'<div style="font-size:10px;font-weight:800;text-transform:uppercase;'
             f'letter-spacing:.10em;color:{BLUE};margin-bottom:8px">Quant Thesis</div>'
@@ -2234,7 +2598,7 @@ def _render_stock_detail(
                           GREEN if (sharpe_v or 0) > 1.2 else RED if (sharpe_v or 0) < 0.5 else AMBER),
     ]
     pills = "".join(
-        f'<div style="background:#fff;border:1px solid {BORDER};border-radius:8px;'
+        f'<div style="background:#0F1520;border:1px solid {BORDER};border-radius:8px;'
         f'padding:10px 14px;text-align:center;min-width:90px">'
         f'<div style="font-size:9.5px;font-weight:700;text-transform:uppercase;'
         f'letter-spacing:.08em;color:{MUTED2};margin-bottom:5px">{lbl}</div>'
@@ -2375,7 +2739,7 @@ def _render_stock_detail(
             sprem = sv.get("premium_pct")
             sc_s, sbg_s, slbl_s = SIGNAL_META.get(ssig, (MUTED, GRAY_LT, ssig))
             sp_clr = RED if (sprem or 0) > 5 else GREEN if (sprem or 0) < -10 else AMBER
-            row_bg = "#FFFBEB" if sname == "Base" else "#FAFAFA"
+            row_bg = "#1A1500" if sname == "Base" else "#0A0D14"
             s_rows += (
                 f'<tr style="background:{row_bg};border-bottom:1px solid {BORDER}">'
                 f'<td style="font-weight:800;color:{MUTED};padding:9px 16px;font-size:12px">{sname}</td>'
@@ -2527,7 +2891,7 @@ def _render_stock_detail(
     else:
         score    = NewsFetcher().score_sentiment([a["title"] for a in articles])
         sc_color = GREEN if score >= 60 else RED if score < 40 else AMBER
-        sc_bg    = "#ECFDF5" if score >= 60 else "#FEF2F2" if score < 40 else "#FFFBEB"
+        sc_bg    = GREEN_LT if score >= 60 else RED_LT if score < 40 else AMBER_LT
         sc_label = "Positive" if score >= 60 else "Negative" if score < 40 else "Neutral"
         st.markdown(
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">'
@@ -2581,7 +2945,7 @@ def _render_stock_detail(
         for i, (col, gname, score2, status) in enumerate(
                 zip(gate_cols, GATE_NAMES, gates, statuses)):
             sc_col = GREEN if status == "pass" else AMBER if status == "warn" else RED
-            bg_col = "#ECFDF5" if status == "pass" else "#FFFBEB" if status == "warn" else "#FEF2F2"
+            bg_col = GREEN_LT if status == "pass" else AMBER_LT if status == "warn" else RED_LT
             with col:
                 st.markdown(
                     f'<div style="background:{bg_col};border:1px solid {BORDER};'
@@ -3044,8 +3408,8 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
 
         # Individual stock equity curves (faint)
         _STOCK_COLORS = [
-            "#93C5FD","#6EE7B7","#FCD34D","#F9A8D4","#C4B5FD",
-            "#A5F3FC","#FCA5A5","#86EFAC","#FDE68A","#BAE6FD",
+            "#3B82F6","#10B981","#F59E0B","#EC4899","#8B5CF6",
+            "#06B6D4","#EF4444","#34D399","#FBBF24","#60A5FA",
         ]
         for idx, (t, eq) in enumerate(equity_curves.items()):
             fig.add_trace(go.Scatter(
@@ -3465,7 +3829,7 @@ def tab_calendar(top10, universe_data: dict, valuation: dict = None, risk: dict 
 
                 # Thesis
                 st.markdown(
-                    f'<div style="background:#F8FAFF;border:1px solid {BLUE}22;border-left:3px solid {BLUE};'
+                    f'<div style="background:#0A1525;border:1px solid {BLUE}44;border-left:3px solid {BLUE};'
                     f'border-radius:8px;padding:12px 14px;font-size:13px;color:{TEXT};'
                     f'line-height:1.6;margin-bottom:16px"><b>Quant Thesis:</b> {a["thesis"]}</div>',
                     unsafe_allow_html=True,
@@ -3847,7 +4211,7 @@ def tab_history():
                                 )
 
                     st.markdown(
-                        f'<div style="background:#FAFAFA;border:1px solid {BORDER};border-left:4px solid {sc_color};'
+                        f'<div style="background:#0A0D14;border:1px solid {BORDER};border-left:4px solid {sc_color};'
                         f'border-radius:10px;padding:14px 18px;margin-bottom:10px;'
                         f'display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">'
                         # Ticker block
@@ -4177,7 +4541,7 @@ def render_session_detail(session: dict):
             # ── Col 1: Valuation ─────────────────────────────────────────────
             with c1:
                 st.markdown(
-                    f'<div style="background:#EFF6FF;border:1px solid #BFDBFE;'
+                    f'<div style="background:#0A1525;border:1px solid #1E3A5F;'
                     f'border-radius:10px;padding:14px 16px;height:100%">'
                     f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
                     f'letter-spacing:.08em;color:{BLUE};margin-bottom:10px">Valuation</div>',
@@ -4280,7 +4644,7 @@ def render_session_detail(session: dict):
             # ── Col 2: Risk ──────────────────────────────────────────────────
             with c2:
                 st.markdown(
-                    f'<div style="background:#ECFDF5;border:1px solid #A7F3D0;'
+                    f'<div style="background:#041A12;border:1px solid #064E3B;'
                     f'border-radius:10px;padding:14px 16px;height:100%">'
                     f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
                     f'letter-spacing:.08em;color:{GREEN};margin-bottom:10px">Risk & Quality</div>',
@@ -4351,7 +4715,7 @@ def render_session_detail(session: dict):
             with c3:
                 # Protocol gates
                 st.markdown(
-                    f'<div style="background:#FFFBEB;border:1px solid #FDE68A;'
+                    f'<div style="background:#1A1500;border:1px solid #451A03;'
                     f'border-radius:10px;padding:14px 16px;margin-bottom:12px">'
                     f'<div style="font-size:12px;font-weight:700;text-transform:uppercase;'
                     f'letter-spacing:.08em;color:{AMBER};margin-bottom:10px">Protocol Gates</div>',
@@ -4377,8 +4741,10 @@ def render_session_detail(session: dict):
                         f'{conv}  ·  {pass_ct}/7 passed  ·  {ov_score:.0f}pts</div>'
                     )
                     status_icons = {"PASS": (GREEN, "✓"), "WARN": (AMBER, "~"), "FAIL": (RED, "✗")}
-                    for gi, (gate_name, gate_st) in enumerate(zip(gates, gate_stats)):
-                        color, sym = status_icons.get(gate_st, (MUTED, "?"))
+                    for gi, gate_st in enumerate(gate_stats):
+                        gate_name = GATE_NAMES[gi] if gi < len(GATE_NAMES) else f"Gate {gi+1}"
+                        st_key = gate_st.upper() if isinstance(gate_st, str) else "FAIL"
+                        color, sym = status_icons.get(st_key, (MUTED, "?"))
                         short_name = gate_name[:28] + "…" if len(gate_name) > 28 else gate_name
                         gate_html += (
                             f'<div style="display:flex;align-items:center;gap:5px;'
@@ -4462,7 +4828,7 @@ def tab_settings():
     )
 
     theme_cols = st.columns(len(THEMES))
-    current_theme = s.get("theme", "Light")
+    current_theme = s.get("theme", "Terminal")
     new_theme = current_theme
     for i, (tname, tmeta) in enumerate(THEMES.items()):
         with theme_cols[i]:
@@ -4475,8 +4841,8 @@ def tab_settings():
                 f'box-shadow:{"0 0 0 3px " + tmeta["accent"] + "33" if selected else "none"}">'
                 f'<div style="width:28px;height:28px;border-radius:50%;background:{tmeta["accent"]};'
                 f'margin:0 auto 8px"></div>'
-                f'<div style="font-size:12px;font-weight:700;color:{TEXT}">{check}{tname}</div>'
-                f'<div style="font-size:10px;color:{MUTED};margin-top:2px">bg · {tmeta["bg"]}</div>'
+                f'<div style="font-size:12px;font-weight:700;color:{"#E2E8F0" if tname in ("Terminal","Dark") else "#111827"}">{check}{tname}</div>'
+                f'<div style="font-size:10px;color:{"#64748B" if tname in ("Terminal","Dark") else "#6B7280"};margin-top:2px">bg · {tmeta["bg"]}</div>'
                 f'</div>',
                 unsafe_allow_html=True,
             )
@@ -4636,7 +5002,7 @@ def tab_settings():
     }
     cur_sig = s.get("signal_mode", "Balanced")
     st.markdown(
-        f'<div style="background:{BLUE_LT};border:1px solid #BFDBFE;border-left:4px solid {BLUE};'
+        f'<div style="background:#0A1525;border:1px solid #1E3A5F;border-left:4px solid {BLUE};'
         f'border-radius:10px;padding:14px 18px;font-size:13px;color:{TEXT}">'
         f'<b>Active configuration</b> — '
         f'Theme: <b>{s.get("theme","Light")}</b> · '
@@ -4820,7 +5186,7 @@ def main():
 
     with tab1:  tab_rankings(top10, profile, val, proto, risk)
     with tab2:  tab_valuation(top10, val)
-    with tab3:  tab_risk(top10, risk)
+    with tab3:  tab_risk(top10, risk, uni)
     with tab4:  tab_protocol(top10, proto)
     with tab5:  tab_portfolio(top10, profile)
     with tab6:  tab_macro(top10, macro, uni, sp500, profile)
