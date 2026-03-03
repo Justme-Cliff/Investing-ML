@@ -588,7 +588,6 @@ def _plotly_base():
         font=dict(family="Inter, -apple-system, sans-serif", size=12, color="#94A3B8"),
         plot_bgcolor="#0F1520",
         paper_bgcolor="#0A0D14",
-        margin=dict(l=20, r=20, t=40, b=20),
     )
 
 
