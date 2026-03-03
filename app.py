@@ -1169,7 +1169,7 @@ def render_macro_strip(macro, top10, rf_rate):
     tiles = [
         (c1, "VIX",           f"{vix:.1f}" if vix else "N/A",    "Elevated — use caution" if (vix or 0) > 25 else "Normal range", vix_color, vix_color),
         (c2, "10-Year Yield", f"{y10:.2f}%" if y10 else "N/A",   f"Risk-free rate  ·  rf = {rf_rate*100:.2f}%", TEXT, BLUE),
-        (c3, "Regime",        regime,                             reasons[:52] if reasons else "—", r_color, r_color),
+        (c3, "Regime",        regime,                             reasons[:40] if reasons else "—", r_color, r_color),
         (c4, "In Portfolio",  str(n),                             "Stocks selected", BLUE, BLUE),
         (c5, "Avg Score",     f"{avg_sc:.1f}",                    "Portfolio composite / 100", avg_clr, avg_clr),
     ]
@@ -1946,7 +1946,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
                     "Risk-free rate basis", TEXT, BLUE)
             + "<br>"
             + mtile("Regime", regime,
-                    "  ·  ".join(macro.get("regime_reasons", []))[:52], rc, rc),
+                    "  ·  ".join(macro.get("regime_reasons", []))[:40], rc, rc),
             unsafe_allow_html=True,
         )
 
@@ -2172,7 +2172,7 @@ def _factor_radar_chart(top10: pd.DataFrame) -> go.Figure:
             fill="toself",
             name=row["ticker"],
             line=dict(color=color, width=2),
-            fillcolor=color.replace(")", ", 0.10)").replace("rgb", "rgba") if color.startswith("rgb") else color + "1A",
+            fillcolor=f"rgba({int(color[1:3],16)},{int(color[3:5],16)},{int(color[5:7],16)},0.10)",
             opacity=0.85,
             hovertemplate="<b>" + row["ticker"] + "</b> — %{theta}<br>Score: %{r:.1f}<extra></extra>",
         ))
@@ -2250,7 +2250,7 @@ def _monte_carlo_chart(top10: pd.DataFrame, universe_data: dict, n_sims: int = 2
     paths = np.ones((n_sims, days + 1))
     for mu, sigma in daily_stats:
         draws = np.random.normal(mu, sigma, (n_sims, days))
-        paths *= (1 + draws)
+        paths[:, 1:] *= (1 + draws)
     paths = paths ** (1 / len(daily_stats))  # geometric mean per stock
     x = list(range(days + 1))
 
@@ -2276,7 +2276,7 @@ def _monte_carlo_chart(top10: pd.DataFrame, universe_data: dict, n_sims: int = 2
             x=x + x[::-1],
             y=list(pcts[hi]) + list(pcts[lo])[::-1],
             fill="toself", mode="none",
-            fillcolor=clr + "55", name=lbl,
+            fillcolor=f"rgba({int(clr[1:3],16)},{int(clr[3:5],16)},{int(clr[5:7],16)},0.33)", name=lbl,
             hoverinfo="skip",
         ))
 
