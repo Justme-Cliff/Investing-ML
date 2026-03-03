@@ -221,6 +221,37 @@ class MultiFactorScorer:
                 alpha_6m      = r6m - beta_raw * _mr[126]
                 momentum_raw += max(-0.05, min(0.05, alpha_6m * 0.15))
 
+        # Forward fundamental alpha: analyst underestimation pattern.
+        # Jensen's alpha above is backward-looking (past price vs past market).
+        # This is forward-looking: when a company CONSISTENTLY beats estimates
+        # by a WIDE margin, analyst models are structurally too pessimistic —
+        # and structural biases persist. Future beats → future re-ratings → alpha.
+        # Only fires when BOTH rate (chronic) AND magnitude (meaningful) align,
+        # filtering out lucky one-off beats from persistent edge.
+        _beat_rate = data.get("earnings_beat_rate")
+        _eps_surp  = data.get("earnings_surprise_avg")
+        if _beat_rate is not None and _eps_surp is not None:
+            _br, _es = float(_beat_rate), float(_eps_surp)
+            if _br > 0.65 and _es > 2.0:
+                # Analysts systematically too low → keep beating → sustained alpha
+                _fwd = min(0.05, (_br - 0.50) * _es / 150.0)
+                momentum_raw += _fwd
+            elif _br < 0.35 and _es < -2.0:
+                # Analysts systematically too high → chronic disappointments ahead
+                _fwd = -min(0.05, (0.50 - _br) * abs(_es) / 150.0)
+                momentum_raw += _fwd
+
+        # 52-Week High Momentum (George & Hwang 2004)
+        # Stocks trading near their 52-week high continue outperforming.
+        # Investors anchor to the 52w high as a reference, causing underreaction
+        # that resolves in sustained continuation when the level is approached.
+        # Signal is entirely forward-looking: today's nearness predicts next 6-12M.
+        high_52w = info.get("fiftyTwoWeekHigh")
+        if high_52w and float(high_52w) > 0:
+            nearness     = min(1.0, price / float(high_52w))
+            wh_adj       = (nearness - 0.75) * 0.20   # neutral at 75%; ±0.05 range
+            momentum_raw += max(-0.05, min(0.05, wh_adj))
+
         # ── 2. Volatility + Beta Risk (inverted: low = high score) ──────────
         # Blends realised idiosyncratic volatility with systematic market risk.
         # A high-beta stock that happens to be calm still carries market exposure,
@@ -254,6 +285,14 @@ class MultiFactorScorer:
         else:
             fcf_ratio = None
 
+        # Shareholder yield: dividends + share buybacks (Boudoukh et al.)
+        # Total cash returned to shareholders is a stronger value signal than
+        # dividend yield alone — buybacks are tax-efficient and signal mgmt
+        # confidence. Combined yield predicts returns better than P/E alone.
+        div_yield_raw  = float(info.get("dividendYield", 0) or 0)
+        buyback_y      = float(data.get("buyback_yield") or 0)
+        shareholder_yield = min(0.20, div_yield_raw + buyback_y)   # cap at 20%
+
         # Blend value signals (weighted by availability)
         val_components = []
         if not math.isnan(pe_score):
@@ -262,6 +301,8 @@ class MultiFactorScorer:
             val_components.append((ev_score, 0.35))
         if fcf_ratio is not None:
             val_components.append((fcf_ratio, 0.25))
+        if shareholder_yield > 0:
+            val_components.append((shareholder_yield, 0.20))
 
         if val_components:
             total_w  = sum(wt for _, wt in val_components)
@@ -319,6 +360,24 @@ class MultiFactorScorer:
             # >70% = heavily validated; <20% = underfollowed. Range: −0.05 to +0.06
             inst_adj = max(-0.05, min(0.06, (ip - 0.45) * 0.12))
             quality_raw += inst_adj
+
+        # ── Source 1d: Asset growth penalty (Cooper et al. 2008) ────────────
+        # Companies aggressively expanding total assets destroy return on capital.
+        # Normal organic growth (≤15% YoY) is fine and gets no penalty.
+        # Above 15% the penalty scales linearly — capped at −0.10.
+        asset_growth = data.get("asset_growth")
+        if asset_growth is not None:
+            ag = float(asset_growth)
+            if ag > 0.15:
+                quality_raw -= min(0.10, (ag - 0.15) * 0.25)
+
+        # ── Source 1f: EPS consistency (consecutive years of growth) ─────────
+        # Consecutive EPS growth is one of the cleanest proxies for a durable
+        # competitive advantage. 4 straight years = maximum bonus (+0.08).
+        # This rewards compounders that grow earnings through full market cycles.
+        eps_cons = data.get("eps_consistency")
+        if eps_cons is not None:
+            quality_raw += min(0.08, int(eps_cons) / 4.0 * 0.08)
 
         # ── 5. Technical (pre-computed with Bollinger + OBV) ──────────────────
         technical_raw = data.get("technical", 50.0) / 100

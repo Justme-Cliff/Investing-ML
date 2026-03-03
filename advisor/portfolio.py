@@ -60,38 +60,45 @@ class PortfolioConstructor:
             if best_ticker:
                 selected.append(best_ticker)
 
-        # ── Portfolio beta cap ─────────────────────────────────────────────────
-        # After greedy selection, check the portfolio's average beta. If it
-        # exceeds the risk-level target, swap out the highest-beta holding for
-        # the best-scoring lower-beta alternative from the extended pool (top-50).
-        # This prevents the portfolio from being a leveraged S&P 500 proxy that
-        # amplifies market moves in both directions.
+        # ── Portfolio beta cap — progressive multi-swap ────────────────────────
+        # After greedy selection, check the portfolio's average beta. Loop up to
+        # 3 passes: each pass swaps out the highest-beta holding for the best
+        # lower-beta alternative from the extended pool (top-50).
+        #
+        # Threshold relaxes each pass (0.15 → 0.05 → any lower beta) so the
+        # algorithm doesn't give up prematurely when good candidates exist but
+        # fall just outside the strict cutoff. Stops early when portfolio beta
+        # is within target or no better alternative is available.
         _beta_targets = {1: 0.90, 2: 1.05, 3: 1.30, 4: 1.60}
         beta_target   = _beta_targets.get(risk_level, 1.10)
+        extended      = ranked_df.head(min(50, len(ranked_df)))
 
         if "beta" in ranked_df.columns and len(selected) > 0:
-            sel_df    = ranked_df[ranked_df["ticker"].isin(selected)][
-                ["ticker", "beta", "composite_score"]
-            ]
-            port_beta = float(sel_df["beta"].mean())
+            for _pass, _threshold in enumerate([0.15, 0.05, 0.0]):
+                sel_df    = ranked_df[ranked_df["ticker"].isin(selected)][
+                    ["ticker", "beta", "composite_score"]
+                ]
+                port_beta = float(sel_df["beta"].mean())
 
-            if port_beta > beta_target:
-                # Highest-beta stock in the portfolio is the prime swap candidate
+                if port_beta <= beta_target:
+                    break   # within target — no more swaps needed
+
+                # Highest-beta holding is the prime swap candidate
                 worst_row    = sel_df.sort_values("beta", ascending=False).iloc[0]
                 worst_ticker = worst_row["ticker"]
                 worst_beta   = float(worst_row["beta"])
 
-                # Search extended pool (top-50) for unselected lower-beta alternatives
-                extended = ranked_df.head(min(50, len(ranked_df)))
                 not_sel  = extended[~extended["ticker"].isin(selected)]
-                low_beta = not_sel[not_sel["beta"] < worst_beta - 0.15]
+                low_beta = not_sel[not_sel["beta"] < worst_beta - _threshold]
 
-                if not low_beta.empty:
-                    replacement = (
-                        low_beta.sort_values("composite_score", ascending=False)
-                        .iloc[0]["ticker"]
-                    )
-                    selected = [replacement if t == worst_ticker else t for t in selected]
+                if low_beta.empty:
+                    continue   # relax threshold on next pass
+
+                replacement = (
+                    low_beta.sort_values("composite_score", ascending=False)
+                    .iloc[0]["ticker"]
+                )
+                selected = [replacement if t == worst_ticker else t for t in selected]
 
         final = ranked_df[ranked_df["ticker"].isin(selected)].copy()
         final = final.sort_values("composite_score", ascending=False).reset_index(drop=True)

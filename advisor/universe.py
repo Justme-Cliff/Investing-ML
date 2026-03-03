@@ -207,27 +207,50 @@ def fetch_us_universe(
 
 def _select(all_tickers: List[str], max_tickers: int, verbose: bool) -> List[str]:
     """
-    Stratified selection: top-200 large-cap guaranteed + random sample of rest.
-    This guarantees quality (large-caps always present) AND variety (random
-    mid/small-caps rotate on every run).
+    Stratified selection:
+      1. Top-200 by market cap — quality anchor (large-caps always present)
+      2. Full curated STOCK_UNIVERSE — guaranteed sector breadth and low-beta
+         defensive stocks for portfolio beta management (utilities, staples, etc.)
+      3. Random sample of remaining tickers — variety / discovery
+
+    Guaranteeing the curated list solves a key problem: the random sample may
+    entirely skip defensive sectors, leaving the portfolio with no low-beta
+    swap candidates when the beta cap fires.
     """
+    from config import STOCK_UNIVERSE
+    curated = [t for lst in STOCK_UNIVERSE.values() for t in lst]
+
     if len(all_tickers) <= max_tickers:
-        return all_tickers
+        # Even in a small universe, inject curated tickers that aren't present
+        merged = list(dict.fromkeys(all_tickers + curated))
+        return merged[:max_tickers]
 
-    top_n   = min(200, max_tickers)
-    top     = all_tickers[:top_n]
-    rest    = all_tickers[top_n:]
+    top_n = min(200, max_tickers)
+    top   = all_tickers[:top_n]
 
-    remaining = max_tickers - top_n
-    random.shuffle(rest)
-    sampled = rest[:remaining]
+    # Guaranteed base: top-200 by cap + any curated ticker not already in top-200
+    top_set       = set(top)
+    extra_curated = [t for t in curated if t not in top_set]
+    guaranteed    = top + extra_curated          # deduplicated by construction
+    guaranteed_set = top_set | set(extra_curated)
 
-    selected = list(dict.fromkeys(top + sampled))   # deduplicate, preserve order
+    remaining = max_tickers - len(guaranteed)
+    if remaining <= 0:
+        # Curated list filled the budget — trim and return
+        return list(dict.fromkeys(guaranteed))[:max_tickers]
+
+    # Fill leftover slots with a random mid/small-cap sample
+    pool    = [t for t in all_tickers[top_n:] if t not in guaranteed_set]
+    random.shuffle(pool)
+    sampled = pool[:remaining]
+
+    selected = list(dict.fromkeys(guaranteed + sampled))
 
     if verbose:
         print(
             f"  Selected {len(selected):,} stocks for this run  "
-            f"({top_n} large-cap anchor + {len(sampled)} random mid/small-cap)"
+            f"({top_n} large-cap anchor + {len(extra_curated)} curated defensive"
+            f" + {len(sampled)} random mid/small-cap)"
         )
     return selected
 

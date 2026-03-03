@@ -556,6 +556,71 @@ class DataFetcher:
                 except Exception:
                     pass
 
+                # ── Source 1d: quarterly balance sheet → YoY asset growth ──────
+                # Cooper et al. (2008): top-quintile asset growers underperform
+                # by ~8%/year. Aggressive balance sheet expansion destroys ROIC.
+                asset_growth = None
+                try:
+                    with contextlib.redirect_stderr(sink):
+                        qbs = t.quarterly_balance_sheet
+                    if qbs is not None and not qbs.empty:
+                        for ta_label in ("Total Assets", "TotalAssets"):
+                            if ta_label in qbs.index:
+                                ta_ser = qbs.loc[ta_label].dropna()
+                                if len(ta_ser) >= 5:   # need ~4 quarters for YoY
+                                    ta_now = float(ta_ser.iloc[0])
+                                    ta_yr  = float(ta_ser.iloc[4])
+                                    if abs(ta_yr) > 0:
+                                        asset_growth = (ta_now - ta_yr) / abs(ta_yr)
+                                break
+                except Exception:
+                    pass
+
+                # ── Source 1e: annual cashflow → buyback yield ───────────────
+                # Boudoukh et al.: shareholder yield (divs + buybacks) is a
+                # stronger predictor of future returns than dividend yield alone.
+                buyback_yield = None
+                try:
+                    with contextlib.redirect_stderr(sink):
+                        cf = t.cashflow   # annual cashflow statement
+                    mktcap = float(info.get("marketCap") or 0)
+                    if cf is not None and not cf.empty and mktcap > 0:
+                        for bb_label in (
+                            "Repurchase Of Capital Stock",
+                            "Common Stock Repurchased",
+                            "RepurchaseOfCapitalStock",
+                        ):
+                            if bb_label in cf.index:
+                                bb_ser = cf.loc[bb_label].dropna()
+                                if len(bb_ser) > 0:
+                                    # Outflows recorded as negative in cashflow statements
+                                    buyback_yield = abs(float(bb_ser.iloc[0])) / mktcap
+                                break
+                except Exception:
+                    pass
+
+                # ── Source 1f: annual income statement → EPS consistency ─────
+                # Consecutive years of EPS growth signals pricing power,
+                # scalable model, and execution quality — advantages that compound.
+                eps_consistency = 0
+                try:
+                    with contextlib.redirect_stderr(sink):
+                        ann = t.income_stmt   # annual income statement (4 years)
+                    if ann is not None and not ann.empty:
+                        for eps_label in ("Diluted EPS", "Basic EPS", "Net Income"):
+                            if eps_label in ann.index:
+                                eps_ser = ann.loc[eps_label].dropna()
+                                consec = 0
+                                for i in range(len(eps_ser) - 1):
+                                    if float(eps_ser.iloc[i]) > float(eps_ser.iloc[i + 1]):
+                                        consec += 1
+                                    else:
+                                        break
+                                eps_consistency = consec
+                                break
+                except Exception:
+                    pass
+
                 # ── Finnhub supplemental signals (optional, non-blocking) ──────
                 finnhub = self._fetch_finnhub_signals(ticker)
 
@@ -578,6 +643,9 @@ class DataFetcher:
                     "revenue_trend":         revenue_trend,       # QoQ revenue growth
                     "earnings_beat_rate":    earnings_beat_rate,  # fraction of quarters beating EPS
                     "institutional_pct":     institutional_pct,   # % float held by institutions
+                    "asset_growth":          asset_growth,        # YoY total assets growth rate
+                    "buyback_yield":         buyback_yield,       # share repurchases / market cap
+                    "eps_consistency":       eps_consistency,     # consecutive years of EPS growth
                 }
             except Exception:
                 if attempt < 2:
