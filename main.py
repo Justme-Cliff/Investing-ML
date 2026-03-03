@@ -102,7 +102,7 @@ def main():
     # ── 5. Score stocks ───────────────────────────────────────────────────────
     print("Scoring and ranking stocks...")
     scorer    = MultiFactorScorer(profile, macro_data, adapted_weights)
-    ranked_df = scorer.score_all(universe_data)
+    ranked_df = scorer.score_all(universe_data, sp500_hist=sp500_hist)
 
     if ranked_df.empty:
         print("No stocks passed the profile filters. Try a higher risk level.")
@@ -190,7 +190,7 @@ def main():
 
     # ── 6. Correlation-aware selection + Kelly position sizing ────────────────
     constructor = PortfolioConstructor()
-    top10       = constructor.select(ranked_df, universe_data)
+    top10       = constructor.select(ranked_df, universe_data, profile.risk_level)
     top10_sized = constructor.size_positions(top10, profile.portfolio_size)
 
     # ── 7. Terminal display: quantitative results ─────────────────────────────

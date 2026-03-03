@@ -35,7 +35,27 @@ class MultiFactorScorer:
         self.learned_weights = learned_weights
 
     # ── Main entry ────────────────────────────────────────────────────────────
-    def score_all(self, universe_data: Dict) -> pd.DataFrame:
+    def score_all(self, universe_data: Dict, sp500_hist=None) -> pd.DataFrame:
+        # ── Precompute market returns for Jensen's alpha ───────────────────────
+        # Allows _score_one() to reward stocks that beat the market after
+        # accounting for their beta — true alpha, not just market riding.
+        self._market_returns: dict = {}
+        if sp500_hist is not None:
+            try:
+                if isinstance(sp500_hist.columns, pd.MultiIndex):
+                    sp_close = sp500_hist.xs("Close", axis=1, level=0).squeeze().dropna()
+                else:
+                    sp_close = sp500_hist["Close"].dropna()
+                if hasattr(sp_close.index, "tz") and sp_close.index.tz is not None:
+                    sp_close.index = sp_close.index.tz_localize(None)
+                for days in [21, 63, 126, 252]:
+                    if len(sp_close) > days:
+                        self._market_returns[days] = float(
+                            sp_close.iloc[-1] / sp_close.iloc[-days] - 1
+                        )
+            except Exception:
+                self._market_returns = {}
+
         rows = [self._score_one(t, d) for t, d in universe_data.items()]
         rows = [r for r in rows if r is not None]
         if not rows:
@@ -79,6 +99,32 @@ class MultiFactorScorer:
 
         df = self._apply_macro_tilt(df)
 
+        # ── Regime-aware beta penalty ─────────────────────────────────────────
+        # In defensive regimes, high-beta stocks are doubly dangerous: they
+        # amplify market losses AND have wider idiosyncratic swings.
+        # This penalty ensures the scorer selects stocks that can hold up in
+        # downturns — not just momentum darlings tied to the index direction.
+        #
+        # Penalty scale (pts lost per unit of beta above 1.0):
+        #   crisis / pre_crisis → −12 / −8   (market likely rolling over)
+        #   risk_off / neutral  → −5 / −2    (cautious positioning)
+        #   risk_on             →  0          (let winners run)
+        _beta_coeffs = {
+            "crisis":      12.0,
+            "pre_crisis":   8.0,
+            "risk_off":     5.0,
+            "neutral":      2.0,
+            "rising_rate":  2.0,
+            "falling_rate": 0.0,
+            "risk_on":      0.0,
+        }
+        _beta_coeff = _beta_coeffs.get(self.macro_data.get("regime", "neutral"), 2.0)
+        if _beta_coeff > 0 and "beta" in df.columns:
+            excess_beta = (df["beta"] - 1.0).clip(lower=0.0)
+            df["composite_score"] = (
+                df["composite_score"] - excess_beta * _beta_coeff
+            ).clip(lower=0)
+
         # ── Distress penalty + hard exclusion (survivorship bias mitigation) ────
         # Stocks showing multiple financial distress signals get penalised.
         # This prevents a high-momentum distressed company from sneaking into
@@ -116,6 +162,9 @@ class MultiFactorScorer:
         price = float(close.iloc[-1])
         if price < 5:
             return None
+
+        # Extract beta early — needed for volatility factor and Jensen's alpha
+        beta_raw = max(0.1, min(float(info.get("beta", 1.0) or 1.0), 4.0))
 
         # ── 1. Momentum (12-1 academic grade) ────────────────────────────────
         r1m = self._ret(close, 21)
@@ -158,10 +207,28 @@ class MultiFactorScorer:
             relative      = r3m - sector_etf_3m / 100.0
             momentum_raw += max(-0.08, min(0.08, relative * 0.20))
 
-        # ── 2. Volatility (inverted: low vol = high score) ────────────────────
-        daily_ret    = close.pct_change().dropna()
-        vol          = float(daily_ret.std()) * math.sqrt(252)
-        volatility_raw = -vol
+        # Jensen's alpha: excess return vs what the stock's beta predicts.
+        # alpha = stock_return − beta × market_return
+        # Positive alpha = stock beat the market after adjusting for market risk.
+        # This rewards genuine outperformers rather than stocks that merely
+        # ride the market wave with high beta.
+        _mr = self._market_returns
+        if _mr:
+            if r3m is not None and 63 in _mr and _mr[63] != 0:
+                alpha_3m      = r3m - beta_raw * _mr[63]
+                momentum_raw += max(-0.05, min(0.05, alpha_3m * 0.20))
+            if r6m is not None and 126 in _mr and _mr[126] != 0:
+                alpha_6m      = r6m - beta_raw * _mr[126]
+                momentum_raw += max(-0.05, min(0.05, alpha_6m * 0.15))
+
+        # ── 2. Volatility + Beta Risk (inverted: low = high score) ──────────
+        # Blends realised idiosyncratic volatility with systematic market risk.
+        # A high-beta stock that happens to be calm still carries market exposure,
+        # so both dimensions penalise the score — favouring stocks that are
+        # genuinely less risky, not just lucky in a quiet period.
+        daily_ret      = close.pct_change().dropna()
+        vol            = float(daily_ret.std()) * math.sqrt(252)
+        volatility_raw = -(vol * 0.60 + max(0.0, beta_raw - 0.5) * 0.10)
 
         # ── 3. Value — 3-signal composite (P/E + EV/EBITDA + FCF yield) ──────
         pe = info.get("trailingPE")
@@ -293,7 +360,7 @@ class MultiFactorScorer:
         dividend_raw = div
 
         # Filter fields
-        beta       = float(info.get("beta",      1.0) or 1.0)
+        beta       = beta_raw
         market_cap = float(info.get("marketCap", 0)   or 0)
 
         # ── Distress flags (count of danger signals) ──────────────────────────

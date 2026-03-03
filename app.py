@@ -910,7 +910,7 @@ def run_analysis(profile: UserProfile) -> dict:
     memory  = SessionMemory(); memory.load()
     adapted = memory.get_adapted_weights(profile.risk_level, profile.time_horizon)
     scorer  = MultiFactorScorer(profile, res["macro_data"], adapted)
-    ranked_df = scorer.score_all(res["universe_data"])
+    ranked_df = scorer.score_all(res["universe_data"], sp500_hist=res.get("sp500_hist"))
 
     # ── Apply learned intelligence (pattern + sector + regime) ────────────────
     regime = res["macro_data"].get("regime", "neutral")
@@ -987,7 +987,7 @@ def run_analysis(profile: UserProfile) -> dict:
     prog.progress(56, text="Building portfolio (correlation-aware selection)…")
 
     constructor  = PortfolioConstructor()
-    top10        = constructor.select(res["ranked_df"], res["universe_data"])
+    top10        = constructor.select(res["ranked_df"], res["universe_data"], profile.risk_level)
     res["top10"] = constructor.size_positions(top10, profile.portfolio_size)
     prog.progress(66, text="Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF)…")
 
