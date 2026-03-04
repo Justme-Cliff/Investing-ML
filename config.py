@@ -14,6 +14,7 @@ NEWSAPI_KEY      = os.getenv("NEWSAPI_KEY",      "")   # broad financial news se
 FRED_KEY         = os.getenv("FRED_KEY",         "")   # macro series: CPI, UNRATE, FEDFUNDS, T10Y2Y, etc.
 ALPHAVANTAGE_KEY = os.getenv("ALPHAVANTAGE_KEY", "")   # earnings, income statement supplements
 FMP_KEY          = os.getenv("FMP_KEY",          "")   # Financial Modeling Prep: analyst revisions, ratings
+BLS_KEY          = os.getenv("BLS_KEY",          "")   # Bureau of Labor Statistics (optional — 500/day with key vs 25 without)
 
 # ── Dynamic universe settings ─────────────────────────────────────────────────
 # When DYNAMIC_UNIVERSE = True the pipeline downloads ALL US-listed common
@@ -24,7 +25,8 @@ FMP_KEY          = os.getenv("FMP_KEY",          "")   # Financial Modeling Prep
 # Raise UNIVERSE_MAX_TICKERS for deeper coverage (runtime scales linearly).
 DYNAMIC_UNIVERSE        = True
 UNIVERSE_MIN_MARKET_CAP = 100_000_000   # $100 M — filters out micro-cap noise
-UNIVERSE_MAX_TICKERS    = 500           # stocks scored per run (~5–10 min)
+UNIVERSE_MAX_TICKERS    = 800           # stocks scored per run (expanded for international coverage)
+PORTFOLIO_N             = 15            # final portfolio size (15 = better diversification vs 10)
 
 # ── Sector equity risk premiums (% — added to rf_rate for sector-specific WACC/DCF) ─
 SECTOR_ERP = {
@@ -72,6 +74,16 @@ STOCK_UNIVERSE = {
         # Cloud / cybersecurity / software
         "CRWD", "ZS", "NET", "DDOG", "SNOW", "PLTR", "WDAY",
         "HUBS", "TEAM", "FTNT", "OKTA", "MDB", "GTLB",
+        # International ADRs — Technology
+        "ASML",   # ASML Holding (Netherlands) — world's only EUV lithography maker
+        "TSM",    # Taiwan Semiconductor — largest foundry globally
+        "SAP",    # SAP SE (Germany) — enterprise software leader
+        "SHOP",   # Shopify (Canada) — e-commerce platform
+        "SE",     # Sea Limited (Singapore) — Southeast Asia tech conglomerate
+        "GRAB",   # Grab Holdings (Singapore) — SEA super-app
+        "MELI",   # MercadoLibre (Argentina) — LatAm e-commerce + fintech
+        "BIDU",   # Baidu (China) — search + AI
+        "JD",     # JD.com (China) — e-commerce
     ],
     "Healthcare": [
         # Mega-cap / established
@@ -83,6 +95,13 @@ STOCK_UNIVERSE = {
         # Biotech / medtech
         "BIIB", "ILMN", "IDXX", "EW", "MTD", "BAX", "HOLX",
         "MRNA", "IQV", "DXCM", "PODD", "EXAS", "INCY", "ALNY", "GEHC",
+        # International ADRs — Healthcare
+        "NVO",    # Novo Nordisk (Denmark) — GLP-1 diabetes/obesity leader
+        "AZN",    # AstraZeneca (UK) — oncology + rare disease
+        "NVS",    # Novartis (Switzerland) — diversified pharma
+        "SNY",    # Sanofi (France) — immunology + vaccines
+        "GSK",    # GSK (UK) — vaccines + specialty medicines
+        "RHHBY",  # Roche (Switzerland) — diagnostics + oncology
     ],
     "Financials": [
         # Mega-cap / diversified
@@ -97,6 +116,12 @@ STOCK_UNIVERSE = {
         "MTB", "HBAN", "RF", "KEY", "CFG", "FITB",
         # Consumer finance
         "ALLY", "SYF",
+        # International ADRs — Financials
+        "ING",    # ING Groep (Netherlands) — European banking
+        "SAN",    # Banco Santander (Spain) — global retail banking
+        "MFC",    # Manulife Financial (Canada) — insurance + wealth mgmt
+        "ITUB",   # Itaú Unibanco (Brazil) — largest LatAm bank
+        "BBD",    # Bradesco (Brazil) — LatAm banking
     ],
     "Consumer": [
         # Staples / retail
@@ -108,6 +133,13 @@ STOCK_UNIVERSE = {
         "DG", "DLTR", "BBY", "F", "GM", "KR", "UBER",
         # Travel / leisure / restaurants
         "BKNG", "EXPE", "MAR", "HLT", "CMG", "DRI", "QSR",
+        # International ADRs — Consumer
+        "TM",     # Toyota Motor (Japan) — world's largest automaker
+        "HMC",    # Honda Motor (Japan) — autos + motorcycles
+        "SONY",   # Sony Group (Japan) — entertainment + electronics
+        "UL",     # Unilever (UK/Netherlands) — consumer staples
+        "DEO",    # Diageo (UK) — premium spirits leader
+        "NSRGY",  # Nestlé (Switzerland) — largest food company
     ],
     "Energy": [
         # Integrated / E&P
@@ -117,6 +149,12 @@ STOCK_UNIVERSE = {
         "APA", "FANG", "HAL", "CTRA", "RIG",
         # Midstream
         "TRGP", "OKE", "ET", "MPLX", "WES",
+        # International ADRs — Energy
+        "SHEL",   # Shell (UK/Netherlands) — major integrated oil & gas
+        "BP",     # BP (UK) — integrated energy + renewables
+        "SU",     # Suncor Energy (Canada) — oil sands + refining
+        "TTE",    # TotalEnergies (France) — integrated energy
+        "E",      # Eni (Italy) — integrated oil & gas
     ],
     "Industrials": [
         # Diversified / transport
@@ -128,6 +166,11 @@ STOCK_UNIVERSE = {
         # Specialty / automation
         "CARR", "OTIS", "CPRT", "ROP", "VRSK", "CTAS",
         "GWW", "SWK", "XYL", "GNRC", "IR", "AME", "AXON",
+        # International ADRs — Industrials
+        "CNI",    # Canadian National Railway — top-tier NA railroad
+        "CP",     # Canadian Pacific Kansas City — transcontinental railroad
+        "SIEGY",  # Siemens (Germany) — industrial automation + electrification
+        "ABB",    # ABB Ltd (Switzerland) — robotics + power grids
     ],
     "Utilities": [
         # Established

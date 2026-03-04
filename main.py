@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore")
 from config import (
     STOCK_UNIVERSE, DYNAMIC_UNIVERSE,
     UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
-    WEIGHT_MATRIX,
+    WEIGHT_MATRIX, PORTFOLIO_N,
 )
 
 from advisor.collector    import InputCollector
@@ -168,6 +168,23 @@ def main():
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
+    # ── 5b-cont. Portfolio continuity bonus (transaction cost simulation) ─────
+    # Selling and re-buying a position costs ~0.1–0.2% in round-trip friction.
+    # A small +3pt bonus to last session's picks simulates this avoided cost,
+    # favouring continuation of winning positions over churn.
+    # Disabled in fresh-picks mode so the user's rotation intent is respected.
+    if not profile.avoid_recent:
+        _cont_tickers = memory.get_recent_tickers(n_sessions=1)
+        if _cont_tickers:
+            _cont_mask = ranked_df["ticker"].isin(_cont_tickers)
+            ranked_df.loc[_cont_mask, "composite_score"] = (
+                ranked_df.loc[_cont_mask, "composite_score"] + 3.0
+            ).clip(upper=100)
+            ranked_df = ranked_df.sort_values(
+                "composite_score", ascending=False
+            ).reset_index(drop=True)
+            ranked_df["rank"] = range(1, len(ranked_df) + 1)
+
     # ── 5d. Tier 2 enrichment — options flow + Google Trends + Reddit ─────────
     try:
         from advisor.alternative_data import enrich_top_n
@@ -189,9 +206,9 @@ def main():
             print(f"  Fresh picks mode: -{PENALTY:.0f}pt penalty applied to {mask.sum()} recent picks ({', '.join(recent_tickers)}).\n")
 
     # ── 6. Correlation-aware selection + Kelly position sizing ────────────────
-    constructor = PortfolioConstructor()
+    constructor = PortfolioConstructor(n=PORTFOLIO_N)
     top10       = constructor.select(ranked_df, universe_data, profile.risk_level)
-    top10_sized = constructor.size_positions(top10, profile.portfolio_size)
+    top10_sized = constructor.size_positions(top10, profile.portfolio_size, macro_data=macro_data)
 
     # ── 7. Terminal display: quantitative results ─────────────────────────────
     display.show_results(top10_sized)

@@ -5,8 +5,12 @@ Runs on the top-30 stocks after initial scoring to add:
   - Options flow: put/call ratio + IV rank (yfinance option_chain)
   - Google Trends: 90-day retail search interest change (pytrends)
   - Reddit sentiment: r/stocks + r/investing RSS mention sentiment (feedparser)
+  - Alpha Vantage: EPS surprise history
+  - FMP: analyst revisions + financial rating + revenue growth
+  - SEC EDGAR XBRL: revenue validation fallback
+  - SEC Smart Money: Form 4 insider cluster + 8-K event sentiment (new)
 
-None of these require paid API keys.
+None of these require paid API keys (optional keys enhance quality).
 
 Usage (called from main.py and app.py after scorer.score_all()):
     from advisor.alternative_data import enrich_top_n
@@ -22,6 +26,7 @@ import pandas as pd
 import requests
 
 from config import POSITIVE_WORDS, NEGATIVE_WORDS
+from advisor.smart_money import fetch_smart_money as _fetch_smart_money
 
 # Estimated sentiment factor weight — used to translate sentiment delta → composite delta.
 # Conservative: most profiles weight sentiment 4-7%; we use 6% to stay modest.
@@ -407,7 +412,23 @@ def enrich_top_n(
 
     top_tickers = ranked_df.head(n)["ticker"].tolist()
     total = len(top_tickers)
-    print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC)...")
+    print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC · Smart Money)...")
+
+    # Build SEC CIK map once for smart money lookups
+    _cik_map: dict = {}
+    try:
+        r_cik = requests.get(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": "StockAdvisor contact@stockadvisor.local"},
+            timeout=10,
+        )
+        if r_cik.status_code == 200:
+            _cik_map = {
+                v["ticker"].upper(): str(v["cik_str"])
+                for v in r_cik.json().values()
+            }
+    except Exception:
+        pass
 
     def _bar(done: int, step: str = "", ticker: str = "") -> None:
         pct    = done / total * 100
@@ -478,6 +499,19 @@ def enrich_top_n(
             if sec_data.get("sec_revenue_trend") is not None:
                 universe_data[ticker]["sec_revenue_trend"] = sec_data["sec_revenue_trend"]
 
+        # ── Source 7: SEC Smart Money — Form 4 cluster + 8-K NLP ─────────────
+        # Form 4 cluster: 3+ insiders buying in 60d = conviction signal.
+        # 8-K sentiment: positive catalyst items (earnings, M&A) vs negative
+        # (impairments, restatements, officer resignations).
+        _bar(i, "Smart Money...", ticker)
+        sm_data = {}
+        try:
+            sm_data = _fetch_smart_money(ticker, _cik_map)
+            if sm_data:
+                universe_data[ticker]["smart_money"] = sm_data
+        except Exception:
+            pass
+
         # ── Build full 5-source sentiment (0–100) ─────────────────────────────
         news_score    = float(data.get("sentiment",     50.0))
         insider_score = float(data.get("insider_score", 50.0))
@@ -530,6 +564,16 @@ def enrich_top_n(
             rv = float(sec_data["sec_revenue_trend"])
             sec_boost = max(-1.5, min(1.5, rv * 4.0))
 
+        # Source 7: SEC smart money boost
+        # Form 4 cluster signal: 3+ insiders buying → +2.5 pts max
+        # 8-K event quality: positive catalyst items → up to +2 pts
+        smart_boost = 0.0
+        if sm_data:
+            sm_score = sm_data.get("smart_money_score")
+            if sm_score is not None:
+                # 50 = neutral, 100 = maximum bullish → ±3 pts
+                smart_boost = max(-3.0, min(3.0, (float(sm_score) - 50.0) * 0.06))
+
         # ── Apply all deltas to composite_score ───────────────────────────────
         mask = ranked_df["ticker"] == ticker
         if not mask.any():
@@ -538,7 +582,7 @@ def enrich_top_n(
 
         old_sentiment = float(ranked_df.loc[idx, "sentiment_score"])
         sentiment_delta = (new_sentiment - old_sentiment) * _SENTIMENT_W
-        total_boost = earnings_boost + rating_boost + rev_boost + sec_boost
+        total_boost = earnings_boost + rating_boost + rev_boost + sec_boost + smart_boost
 
         ranked_df.loc[idx, "sentiment_score"] = round(new_sentiment, 2)
         ranked_df.loc[idx, "composite_score"] = float(max(

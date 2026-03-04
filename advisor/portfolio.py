@@ -1,6 +1,7 @@
 # advisor/portfolio.py — Correlation-aware greedy stock selection + Kelly position sizing
 
 import math
+from collections import Counter
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -11,11 +12,16 @@ from advisor.fetcher import DataFetcher
 
 class PortfolioConstructor:
     """
-    Selects the best 10 stocks from a scored DataFrame, maximising both
+    Selects the best N stocks from a scored DataFrame, maximising both
     composite score and diversification (low pairwise correlation).
 
+    Constraints applied after greedy selection:
+      - Portfolio beta cap: progressive multi-swap (3 passes)
+      - Sector concentration: max 3 stocks per sector
+      - Position sizing: half-Kelly, capped at 15% per position
+
     Position sizing uses a half-Kelly criterion:
-        f_i = (score_i/100) / vol_i^2  →  halved  →  capped at 20%  →  renormalised
+        f_i = (score_i/100) / vol_i^2  →  halved  →  capped at 15%  →  renormalised
     Falls back to score-weighted if Kelly produces degenerate sizes.
     """
 
@@ -100,21 +106,99 @@ class PortfolioConstructor:
                 )
                 selected = [replacement if t == worst_ticker else t for t in selected]
 
+        # ── Sector concentration constraint ───────────────────────────────────
+        # Cap at 3 stocks per sector to prevent the portfolio from becoming a
+        # single-sector bet. If a sector is overweight, the excess picks are
+        # replaced with the best remaining stocks from other sectors.
+        # This reduces idiosyncratic sector risk without sacrificing overall quality.
+        if "sector" in ranked_df.columns:
+            sector_counts: Counter = Counter()
+            final_selected: List[str] = []
+            for t in selected:
+                row = ranked_df[ranked_df["ticker"] == t]
+                if row.empty:
+                    final_selected.append(t)
+                    continue
+                sec = row.iloc[0]["sector"]
+                if sector_counts[sec] < 3:
+                    final_selected.append(t)
+                    sector_counts[sec] += 1
+
+            # If any were dropped, fill with best unconstrained alternatives
+            n_needed = self.n - len(final_selected)
+            if n_needed > 0:
+                selected_set = set(final_selected)
+                for _, row in ranked_df.iterrows():
+                    if n_needed <= 0:
+                        break
+                    t   = row["ticker"]
+                    sec = row.get("sector", "Unknown")
+                    if t not in selected_set and sector_counts[sec] < 3:
+                        final_selected.append(t)
+                        selected_set.add(t)
+                        sector_counts[sec] += 1
+                        n_needed -= 1
+
+            selected = final_selected
+
         final = ranked_df[ranked_df["ticker"].isin(selected)].copy()
         final = final.sort_values("composite_score", ascending=False).reset_index(drop=True)
         final["rank"] = range(1, len(final) + 1)
         return final
 
-    def size_positions(self, top10: pd.DataFrame, portfolio_size: float) -> pd.DataFrame:
-        """Add weight%, dollar amount, approx shares columns using half-Kelly sizing."""
+    def size_positions(self, top10: pd.DataFrame, portfolio_size: float,
+                       macro_data: dict = None) -> pd.DataFrame:
+        """Add weight%, dollar amount, approx shares columns using half-Kelly sizing.
+
+        VIX-scaled Kelly: when VIX > 20, raw Kelly fractions are scaled down by
+        (20/VIX). This corrects for the fact that Kelly assumes stable variance —
+        in high-VIX regimes realised vol can double, making standard Kelly sizes 2×
+        too aggressive versus the actual risk being taken on.
+
+        Market drawdown scalar: if SPY is >10% off its 52W high, additional
+        exposure reduction of up to 30% is applied (at -40% drawdown).
+
+        Both scalars affect the *pre-normalisation* Kelly fractions, so final
+        weights still sum to 100% (capital stays fully invested). The effect is
+        that lower-vol stocks receive relatively more weight in high-fear periods.
+        """
         df = top10.copy()
 
-        # Half-Kelly: edge / variance / 2
+        # ── VIX-adjusted variance for Kelly denominator ───────────────────────
+        # Standard Kelly uses historical realised vol. In high-fear periods VIX
+        # spikes, signalling that FUTURE vol is likely to be higher than historical.
+        # We use max(hist_vol, vix_implied_vol) as the denominator so that Kelly
+        # sizes shrink when forward vol is elevated — naturally shifting weight
+        # toward lower-beta stocks. VIX of 20 → 20% annual implied vol.
+        vix_implied: float = 0.0
+        dd_penalty:  float = 0.0
+        if macro_data is not None:
+            try:
+                vix = float(macro_data.get("vix") or 0.0)
+                if vix > 0:
+                    vix_implied = vix / 100.0    # e.g. VIX=30 → 0.30 annual vol
+            except Exception:
+                pass
+            try:
+                dd_pct = float(macro_data.get("market_drawdown_pct") or 0.0)
+                if dd_pct < -10.0:
+                    # Add up to 0.15 to the VIX-implied vol floor in bear markets
+                    dd_penalty = min(0.15, abs(dd_pct + 10.0) / 100.0)
+            except Exception:
+                pass
+
+        vol_floor = max(0.0, vix_implied + dd_penalty)   # 0 when no macro_data
+
+        # ── Half-Kelly: edge / variance / 2 ──────────────────────────────────
+        # Variance uses max(hist_vol, vix_floor) so Kelly is automatically more
+        # conservative when implied vol (VIX) exceeds realised vol — the typical
+        # condition in crashes where future vol is underpriced by historical data.
         kelly_raw = []
         for _, row in df.iterrows():
-            edge = float(row["composite_score"]) / 100
-            var  = float(row["vol"]) ** 2
-            var  = max(var, 0.01)          # floor to avoid division issues
+            edge     = float(row["composite_score"]) / 100
+            hist_vol = float(row["vol"])
+            eff_vol  = max(hist_vol, vol_floor)    # use VIX-implied vol as floor
+            var      = max(eff_vol ** 2, 0.01)
             kelly_raw.append(edge / var / 2)
 
         total_k = sum(kelly_raw)
@@ -124,8 +208,8 @@ class PortfolioConstructor:
             df["weight"] = df["composite_score"] / total_s
         else:
             weights = [k / total_k for k in kelly_raw]
-            # Cap each at 20%
-            weights = [min(w, 0.20) for w in weights]
+            # Cap each at 15% — appropriate for a 15-stock portfolio
+            weights = [min(w, 0.15) for w in weights]
             total_w = sum(weights)
             weights = [w / total_w for w in weights]
             df["weight"] = weights

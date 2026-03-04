@@ -24,7 +24,7 @@ from config import (
     SP500_TICKER, VIX_TICKER, YIELD_10Y_TICKER,
     SECTOR_ETFS, STOCK_UNIVERSE, MACRO_TILTS,
     POSITIVE_WORDS, NEGATIVE_WORDS,
-    FINNHUB_KEY, ALPHAVANTAGE_KEY, FRED_KEY,
+    FINNHUB_KEY, ALPHAVANTAGE_KEY, FRED_KEY, BLS_KEY,
 )
 
 # ── SEC EDGAR CIK map (downloaded once per session, cached module-level) ──────
@@ -624,6 +624,37 @@ class DataFetcher:
                 # ── Finnhub supplemental signals (optional, non-blocking) ──────
                 finnhub = self._fetch_finnhub_signals(ticker)
 
+                # ── Data quality score (0–100) ────────────────────────────────
+                # Counts non-null fundamental fields; scorer penalises < 60.
+                _dq_fields = [
+                    "trailingPE", "marketCap", "totalRevenue", "freeCashflow",
+                    "operatingCashflow", "netIncomeToCommon", "debtToEquity",
+                    "currentRatio", "returnOnEquity", "profitMargins",
+                    "grossMargins", "enterpriseToEbitda",
+                ]
+                _dq_present = sum(
+                    1 for f in _dq_fields
+                    if info.get(f) is not None
+                    and str(info.get(f)).strip() not in ("", "None", "nan")
+                )
+                data_quality_score = round(_dq_present / len(_dq_fields) * 100, 1)
+
+                # Price freshness — detect stale data (>7 days old)
+                _price_freshness = 100.0
+                try:
+                    _last_dt = history.index[-1]
+                    if hasattr(_last_dt, "date"):
+                        _last_date = _last_dt.date()
+                    elif isinstance(_last_dt, str):
+                        _last_date = datetime.date.fromisoformat(str(_last_dt)[:10])
+                    else:
+                        _last_date = datetime.date.fromisoformat(str(_last_dt)[:10])
+                    _stale_days = (datetime.date.today() - _last_date).days
+                    if _stale_days > 7:
+                        _price_freshness = max(0.0, 100.0 - (_stale_days - 7) * (100.0 / 14.0))
+                except Exception:
+                    _price_freshness = 50.0
+
                 return {
                     "info":                  info,
                     "history":               history,
@@ -646,6 +677,9 @@ class DataFetcher:
                     "asset_growth":          asset_growth,        # YoY total assets growth rate
                     "buyback_yield":         buyback_yield,       # share repurchases / market cap
                     "eps_consistency":       eps_consistency,     # consecutive years of EPS growth
+                    # Data integrity
+                    "data_quality_score":    data_quality_score,  # 0–100: % of key fields present
+                    "price_freshness":       round(_price_freshness, 1),  # 0–100: how recent is price
                 }
             except Exception:
                 if attempt < 2:
@@ -839,14 +873,124 @@ class MacroFetcher:
         fred_extra = self._fetch_fred_extended()
         result.update(fred_extra)
 
+        # ── Source 8: CFTC Commitments of Traders (E-mini S&P 500) ──────────────
+        cot = self._fetch_cftc_cot()
+        result.update(cot)
+
+        # ── Source 9: BLS JOLTS job openings rate ──────────────────────────────
+        jolts = self._fetch_bls_jolts()
+        result.update(jolts)
+
         result["regime"], result["regime_reasons"] = self._classify(result)
-        crash_n = result.get("crash_signals", 0)
+        crash_n   = result.get("crash_signals", 0)
+        max_sigs  = result.get("crash_signals_max", 9)
         print(f"  Macro regime: {result['regime'].upper()}", end="")
         if crash_n > 0:
-            print(f"  |  Crash signals active: {crash_n}/5", end="")
+            print(f"  |  Crash signals active: {crash_n}/{max_sigs}", end="")
         print()
         print()
         return result
+
+    def _fetch_cftc_cot(self) -> dict:
+        """
+        Source 8: CFTC Commitments of Traders — E-mini S&P 500 speculator net position.
+        Downloads the current-year financial futures COT CSV from cftc.gov (free, no key).
+        Net speculator position = (Large Spec Long − Large Spec Short) / Total.
+        Returns:
+            cot_net_speculator  float  −1 to +1 (positive = speculators net long = bullish)
+        """
+        try:
+            import zipfile as _zf
+            year = datetime.date.today().year
+            url  = f"https://www.cftc.gov/files/dea/history/fut_fin_txt_{year}.zip"
+            r = requests.get(
+                url,
+                headers={"User-Agent": "StockAdvisor/1.0"},
+                timeout=25,
+            )
+            if r.status_code != 200:
+                return {}
+            z   = _zf.ZipFile(io.BytesIO(r.content))
+            txt = z.read(z.namelist()[0]).decode("utf-8", errors="replace")
+            df  = pd.read_csv(io.StringIO(txt), low_memory=False)
+
+            # Find the E-mini S&P 500 row
+            name_col = df.columns[0]
+            mask = df[name_col].str.contains("E-MINI S&P 500", na=False, case=False)
+            if not mask.any():
+                return {}
+
+            row = df[mask].iloc[-1]   # most recent weekly report
+
+            # Locate non-commercial (speculator) long/short columns
+            long_col  = next(
+                (c for c in df.columns
+                 if "noncomm" in c.lower() and "long" in c.lower() and "all" in c.lower()),
+                None,
+            )
+            short_col = next(
+                (c for c in df.columns
+                 if "noncomm" in c.lower() and "short" in c.lower() and "all" in c.lower()),
+                None,
+            )
+            if long_col and short_col:
+                longs  = float(str(row[long_col]).replace(",", "") or 0)
+                shorts = float(str(row[short_col]).replace(",", "") or 0)
+                total  = longs + shorts
+                if total > 0:
+                    net_pct = (longs - shorts) / total   # −1 to +1
+                    return {"cot_net_speculator": round(net_pct, 3)}
+            return {}
+        except Exception:
+            return {}
+
+    def _fetch_bls_jolts(self) -> dict:
+        """
+        Source 9: BLS JOLTS job openings rate (total nonfarm).
+        Series: JTS000000000000000JOR
+        Declining openings rate = labor market cooling = leading risk-off signal.
+        Returns:
+            jolts_openings_rate  float  current rate (%)
+            jolts_change         float  month-over-month change (fraction, optional)
+        """
+        try:
+            series_id = "JTS000000000000000JOR"
+            today     = datetime.date.today()
+            if BLS_KEY:
+                r = requests.post(
+                    "https://api.bls.gov/publicAPI/v2/timeseries/data/",
+                    json={
+                        "seriesid":       [series_id],
+                        "startyear":      str(today.year - 1),
+                        "endyear":        str(today.year),
+                        "registrationkey": BLS_KEY,
+                    },
+                    timeout=12,
+                )
+            else:
+                r = requests.get(
+                    f"https://api.bls.gov/publicAPI/v1/timeseries/data/{series_id}",
+                    timeout=12,
+                )
+            if r.status_code != 200:
+                return {}
+            payload = r.json()
+            series  = (
+                payload.get("Results", {}).get("series", [])
+                or payload.get("series", [])
+            )
+            for s in series:
+                obs = s.get("data", [])
+                if len(obs) >= 1:
+                    val = float(obs[0].get("value", 0))
+                    if len(obs) >= 2:
+                        prev   = float(obs[1].get("value") or val)
+                        change = (val - prev) / max(abs(prev), 0.01)
+                        return {"jolts_openings_rate": val, "jolts_change": change}
+                    return {"jolts_openings_rate": val}
+            return {}
+        except Exception:
+            return {}
 
     def _fetch_fred_extended(self) -> dict:
         """
@@ -904,7 +1048,11 @@ class MacroFetcher:
         consumer_sentiment = m.get("consumer_sentiment")
         yield_10_2_spread  = m.get("yield_10_2_spread")
 
-        # ── Count crash signals (0–7 with FRED; 0–5 without) ─────────────────
+        # Pull CFTC COT + BLS JOLTS fields
+        cot_net           = m.get("cot_net_speculator")   # −1 to +1
+        jolts_change      = m.get("jolts_change")         # MoM fraction
+
+        # ── Count crash signals (0–9 max) ─────────────────────────────────────
         crash_signals = 0
         crash_reasons = []
 
@@ -945,18 +1093,36 @@ class MacroFetcher:
             crash_signals += 1
             crash_reasons.append(f"FRED HY spread {hy_spread:.2f}% (credit stress)")
 
-        m["crash_signals"] = crash_signals
+        # Signal 8 (CFTC COT): Speculators heavily net short on S&P 500 futures
+        # Large-spec net short ≤ -30% of total open interest = bearish institutional view
+        if cot_net is not None and cot_net < -0.30:
+            crash_signals += 1
+            crash_reasons.append(
+                f"CFTC COT net speculator {cot_net:+.2f} (heavily net short)"
+            )
+
+        # Signal 9 (BLS JOLTS): Job openings rate declining sharply (>5% MoM drop)
+        if jolts_change is not None and jolts_change < -0.05:
+            crash_signals += 1
+            crash_reasons.append(
+                f"JOLTS openings rate −{abs(jolts_change)*100:.1f}% MoM (labor cooling)"
+            )
+
+        # Track max possible for display
+        max_signals = 9
+        m["crash_signals"]     = crash_signals
+        m["crash_signals_max"] = max_signals
 
         # ── Regime classification (crash signals override legacy logic) ────────
         if crash_signals >= 3:
             regime = "crisis"
-            reasons.append(f"CRISIS DETECTED — {crash_signals}/5 crash signals active")
+            reasons.append(f"CRISIS DETECTED — {crash_signals}/{max_signals} crash signals active")
             reasons.extend(crash_reasons)
             return regime, reasons
 
         if crash_signals == 2:
             regime = "pre_crisis"
-            reasons.append(f"PRE-CRISIS — {crash_signals}/5 crash signals active")
+            reasons.append(f"PRE-CRISIS — {crash_signals}/{max_signals} crash signals active")
             reasons.extend(crash_reasons)
             return regime, reasons
 
@@ -1011,8 +1177,27 @@ class MacroFetcher:
                     f"10Y-2Y spread {yield_10_2_spread:.2f}% (steep → growth optimism)"
                 )
 
+        # CFTC COT: strongly net long = bullish confirmation; strongly net short covered above
+        if cot_net is not None:
+            if cot_net > 0.35:
+                reasons.append(f"CFTC COT net speculator +{cot_net:.2f} (strongly net long)")
+                if regime == "neutral":
+                    regime = "risk_on"
+            elif cot_net > 0.10:
+                reasons.append(f"CFTC COT net speculator +{cot_net:.2f} (mildly bullish)")
+
+        # BLS JOLTS: rapidly rising openings = tight labor = risk-on
+        if jolts_change is not None and jolts_change > 0.05:
+            reasons.append(
+                f"JOLTS openings rate +{jolts_change*100:.1f}% MoM (tight labor market)"
+            )
+            if regime == "neutral":
+                regime = "risk_on"
+
         # Surface any sub-threshold crash signals for transparency
         if crash_reasons:
-            reasons.append(f"Crash signals ({crash_signals}/7): {'; '.join(crash_reasons)}")
+            reasons.append(
+                f"Crash signals ({crash_signals}/{max_signals}): {'; '.join(crash_reasons)}"
+            )
 
         return regime, reasons

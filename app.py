@@ -26,7 +26,7 @@ from plotly.subplots import make_subplots
 from config import (
     STOCK_UNIVERSE, WEIGHT_MATRIX, FACTOR_NAMES,
     RISK_LABELS, GOAL_LABELS, HORIZON_LABELS,
-    DYNAMIC_UNIVERSE, UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
+    DYNAMIC_UNIVERSE, UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS, PORTFOLIO_N,
 )
 from advisor.collector    import UserProfile
 from advisor.fetcher      import DataFetcher, MacroFetcher
@@ -961,6 +961,19 @@ def run_analysis(profile: UserProfile) -> dict:
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
+    # Portfolio continuity bonus — mirrors main.py logic
+    if not profile.avoid_recent:
+        _cont_tickers = memory.get_recent_tickers(n_sessions=1)
+        if _cont_tickers:
+            _cont_mask = ranked_df["ticker"].isin(_cont_tickers)
+            ranked_df.loc[_cont_mask, "composite_score"] = (
+                ranked_df.loc[_cont_mask, "composite_score"] + 3.0
+            ).clip(upper=100)
+            ranked_df = ranked_df.sort_values(
+                "composite_score", ascending=False
+            ).reset_index(drop=True)
+            ranked_df["rank"] = range(1, len(ranked_df) + 1)
+
     # ── Tier 2 enrichment: options flow + Google Trends + Reddit ──────────────
     prog.progress(46, text="Enriching top 30 with options flow + retail sentiment…")
     try:
@@ -986,9 +999,10 @@ def run_analysis(profile: UserProfile) -> dict:
     res["ranked_df"] = ranked_df
     prog.progress(56, text="Building portfolio (correlation-aware selection)…")
 
-    constructor  = PortfolioConstructor()
+    constructor  = PortfolioConstructor(n=PORTFOLIO_N)
     top10        = constructor.select(res["ranked_df"], res["universe_data"], profile.risk_level)
-    res["top10"] = constructor.size_positions(top10, profile.portfolio_size)
+    res["top10"] = constructor.size_positions(top10, profile.portfolio_size,
+                                               macro_data=res.get("macro_data"))
     prog.progress(66, text="Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF)…")
 
     res["valuation"] = ValuationEngine(rf_rate).analyze_all(res["top10"], res["universe_data"])

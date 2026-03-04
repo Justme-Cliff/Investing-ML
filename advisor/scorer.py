@@ -97,6 +97,71 @@ class MultiFactorScorer:
             w[6] * df["dividend_score"]
         )
 
+        # ── GARP interaction term (Asness 1997) ──────────────────────────────
+        # Growth at a Reasonable Price: stocks that are simultaneously high-quality
+        # AND high-momentum beat the market more than either factor alone.
+        # The interaction captures non-linearity that linear factor models miss.
+        # Bonus scales from 0 to +15 pts at the theoretical max (100/100 × 100/100).
+        # Implemented AFTER normalization so scores are already cross-sectional.
+        if "momentum_score" in df.columns and "quality_score" in df.columns:
+            garp_bonus = (df["momentum_score"] / 100.0) * (df["quality_score"] / 100.0) * 15.0
+            df["composite_score"] = (df["composite_score"] + garp_bonus).clip(upper=100)
+
+        # ── Value × Quality interaction (Cheap + Quality = persistent alpha) ─
+        # Asness, Frazzini & Pedersen (2019): cheap stocks with strong quality
+        # metrics produce persistent excess returns beyond either factor alone.
+        # GARP above captures momentum×quality; this captures the orthogonal
+        # cheap×quality signal (different economic rationale: margin of safety).
+        # Bonus 0–+10 pts, so it's additive with GARP but smaller in magnitude.
+        if "value_score" in df.columns and "quality_score" in df.columns:
+            vq_bonus = (df["value_score"] / 100.0) * (df["quality_score"] / 100.0) * 10.0
+            df["composite_score"] = (df["composite_score"] + vq_bonus).clip(upper=100)
+
+        # ── Factor crowding detection ─────────────────────────────────────────
+        # When a single factor score correlates >0.92 with composite_score, the
+        # top portfolio is effectively a pure single-factor bet — crowded and
+        # arbitrage-prone. Stocks that score high on the crowded factor but
+        # mediocre across all other factors get a small penalty to push the
+        # selection toward genuinely multi-factor names.
+        _score_cols = [
+            "momentum_score", "volatility_score", "value_score",
+            "quality_score",  "technical_score",  "sentiment_score", "dividend_score",
+        ]
+        _crowded_factor: Optional[str] = None
+        for _col in _score_cols:
+            if _col in df.columns and len(df) > 20:
+                try:
+                    if abs(df["composite_score"].corr(df[_col])) > 0.92:
+                        _crowded_factor = _col
+                        break
+                except Exception:
+                    pass
+
+        if _crowded_factor is not None:
+            _other_cols = [c for c in _score_cols if c != _crowded_factor and c in df.columns]
+            if _other_cols:
+                _other_mean   = df[_other_cols].mean(axis=1)
+                _low_thresh   = _other_mean.quantile(0.33)
+                _top_in_crowd = df[_crowded_factor] > df[_crowded_factor].quantile(0.67)
+                _weak_else    = _other_mean < _low_thresh
+                _crowded_mask = _top_in_crowd & _weak_else
+                df.loc[_crowded_mask, "composite_score"] = (
+                    df.loc[_crowded_mask, "composite_score"] - 4.0
+                ).clip(lower=0)
+
+        # ── Data quality penalty ──────────────────────────────────────────────
+        # Stocks with < 60% of key fundamental fields populated are penalised.
+        # Missing data inflates/deflates factor scores unpredictably; this
+        # prevents data-sparse stocks from accidentally reaching the top-15.
+        # Penalty: (60 − score) × 0.20 pts. At 0/100 → −12 pts; at 60+ → 0.
+        if "data_quality_score" in df.columns:
+            _dq_low = df["data_quality_score"] < 60
+            if _dq_low.any():
+                _dq_pen = (60 - df.loc[_dq_low, "data_quality_score"]) * 0.20
+                df.loc[_dq_low, "composite_score"] = (
+                    df.loc[_dq_low, "composite_score"] - _dq_pen
+                ).clip(lower=0)
+
         df = self._apply_macro_tilt(df)
 
         # ── Regime-aware beta penalty ─────────────────────────────────────────
@@ -328,6 +393,24 @@ class MultiFactorScorer:
             # Good: OCF >> NI (real earnings).  Bad: NI >> OCF (accounting tricks)
             quality_raw += self._clamp(-accruals * 1.5, -0.20, 0.20)
 
+            # ── Beneish M-Score (simplified 2-factor fraud detection) ─────────
+            # Beneish (1999): M > -1.78 flags likely earnings manipulation.
+            # Two strongest components available from yfinance data:
+            #   TATA = Total Accruals / Total Assets (= accruals, already computed)
+            #   SGI  = Sales Growth Index (1 + revenue_growth_rate)
+            # M ≈ 4.679×TATA + 0.892×SGI − 3.0 (partial approx, others zeroed at mean)
+            # This catches Enron-style stocks: earnings not backed by cash AND
+            # aggressive revenue growth (two of the strongest manipulation signals).
+            try:
+                _rev_g    = float(info.get("revenueGrowth") or data.get("revenue_trend") or 0.0)
+                _sgi      = 1.0 + _rev_g
+                _m_approx = 4.679 * accruals + 0.892 * _sgi - 3.0
+                if _m_approx > -1.78:   # above manipulation threshold
+                    _beneish_penalty = min(0.12, (_m_approx + 1.78) * 0.07)
+                    quality_raw -= _beneish_penalty
+            except Exception:
+                pass
+
         # Gross profitability (Novy-Marx 2013 anomaly factor)
         rev = info.get("totalRevenue")
         gm  = info.get("grossMargins")
@@ -446,21 +529,22 @@ class MultiFactorScorer:
         distress = min(distress, 3)   # cap at 3 flags = max -15 pt penalty
 
         return {
-            "ticker":         ticker,
-            "sector":         sector,
-            "current_price":  price,
-            "beta":           beta,
-            "vol":            vol,
-            "market_cap":     market_cap,
-            "momentum_raw":   momentum_raw,
-            "volatility_raw": volatility_raw,
-            "value_raw":      value_raw,
-            "quality_raw":    quality_raw,
-            "technical_raw":  technical_raw,
-            "sentiment_raw":  sentiment_raw,
-            "dividend_raw":   dividend_raw,
-            "div_pct":        div * 100,
-            "distress_flags": distress,
+            "ticker":              ticker,
+            "sector":              sector,
+            "current_price":       price,
+            "beta":                beta,
+            "vol":                 vol,
+            "market_cap":          market_cap,
+            "momentum_raw":        momentum_raw,
+            "volatility_raw":      volatility_raw,
+            "value_raw":           value_raw,
+            "quality_raw":         quality_raw,
+            "technical_raw":       technical_raw,
+            "sentiment_raw":       sentiment_raw,
+            "dividend_raw":        dividend_raw,
+            "div_pct":             div * 100,
+            "distress_flags":      distress,
+            "data_quality_score":  float(data.get("data_quality_score", 100.0)),
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -475,10 +559,22 @@ class MultiFactorScorer:
         return max(lo, min(hi, float(v)))
 
     def _normalise(self, s: pd.Series) -> pd.Series:
-        valid = s.dropna()
-        if len(valid) == 0 or valid.max() == valid.min():
+        """
+        Rank-percentile normalization (replaces min-max).
+
+        Maps each value to its cross-sectional rank expressed as a 0–100 percentile.
+        Robust to extreme outliers: a single stock with a wildly high P/E can't
+        compress every other stock into a narrow band near 0, which min-max would do.
+        Ensures uniform score distribution across the 0–100 range.
+        """
+        n = s.notna().sum()
+        if n == 0:
             return pd.Series(50.0, index=s.index)
-        normed = (s - valid.min()) / (valid.max() - valid.min()) * 100
+        if n == 1:
+            return s.notna().astype(float) * 50.0 + 25.0
+        # Rank: 1 = lowest, n = highest; ties averaged
+        ranks  = s.rank(method="average", na_option="keep")
+        normed = (ranks - 1) / max(n - 1, 1) * 100
         return normed.fillna(50.0)
 
     def _filter(self, df: pd.DataFrame, strict: bool) -> pd.DataFrame:
