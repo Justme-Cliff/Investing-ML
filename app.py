@@ -3080,73 +3080,44 @@ def _normalize_yf(df) -> "pd.DataFrame":
     return df
 
 
-def _run_backtest_simulation(hist: "pd.DataFrame", *args, **kwargs) -> list:
+def _run_backtest_simulation(hist: "pd.DataFrame", entry_low: float, target: float, stop_loss: float) -> list:
     """
-    Honest backtest using ONLY historical price signals — zero look-ahead bias.
+    Valuation-based backtest using the system's own DCF/fair-value levels.
 
-    The old version applied today's DCF/fair-value levels to past prices, which
-    is cheating (you couldn't have known those numbers back then).
+    Entry  : price ≤ entry_low  (FV × 0.80 — 20% margin of safety)
+    Exit   : price ≥ target     (FV × 1.20 — take profit at 20% above FV)
+          OR price ≤ stop_loss  (entry_low × 0.92 — 8% hard stop below entry)
 
-    New strategy (purely look-back):
-      Entry : RSI(14) drops below 38 AND price is above its 150-day SMA
-              → oversold dip inside an established uptrend
-      Exit  : +25% from entry  (take profit)
-           OR −12% from entry  (stop loss)
-           OR RSI rises above 72 (overbought — trim position)
-           OR 120 trading days held (position timeout)
+    NOTE: Uses today's fair value as a static reference applied to historical
+    prices. This is illustrative — it shows how the current valuation level
+    has anchored the stock's price action over the selected period.
     """
-    import numpy as np
-
     hist   = _normalize_yf(hist)
     closes = hist["Close"].squeeze().dropna()
-    if len(closes) < 160:
+    if len(closes) < 10:
         return []
-
-    # ── Compute RSI(14) ───────────────────────────────────────────────────────
-    delta  = closes.diff()
-    gain   = delta.clip(lower=0)
-    loss   = (-delta).clip(lower=0)
-    avg_g  = gain.ewm(com=13, adjust=False).mean()
-    avg_l  = loss.ewm(com=13, adjust=False).mean()
-    rs     = avg_g / avg_l.replace(0, np.nan)
-    rsi    = (100 - 100 / (1 + rs)).fillna(50)
-
-    # ── Compute 150-day SMA ───────────────────────────────────────────────────
-    sma150 = closes.rolling(150).mean()
 
     trades      = []
     in_trade    = False
     entry_price = None
     entry_date  = None
-    days_held   = 0
 
-    dates = list(closes.index)
-    for i, date in enumerate(dates):
-        price    = float(closes.iloc[i])
-        rsi_val  = float(rsi.iloc[i])
-        sma_val  = sma150.iloc[i]
-        sma_valid = (sma_val is not None and not (isinstance(sma_val, float) and np.isnan(sma_val)))
+    for i, date in enumerate(closes.index):
+        price = float(closes.iloc[i])
 
         if not in_trade:
-            # Entry: oversold RSI + price in uptrend (above 150d SMA)
-            if rsi_val < 38 and sma_valid and price > float(sma_val):
+            if price <= entry_low:
                 in_trade    = True
                 entry_price = price
                 entry_date  = date
-                days_held   = 0
         else:
-            days_held += 1
             ret = (price - entry_price) / entry_price * 100
 
             exit_reason = None
-            if ret >= 25.0:
-                exit_reason = "Target hit (+25%)"
-            elif ret <= -12.0:
-                exit_reason = "Stop loss (−12%)"
-            elif rsi_val > 72:
-                exit_reason = "RSI overbought exit"
-            elif days_held >= 120:
-                exit_reason = "120-day timeout"
+            if price >= target:
+                exit_reason = "Target hit"
+            elif price <= stop_loss:
+                exit_reason = "Stop loss"
 
             if exit_reason:
                 trades.append({
@@ -3183,7 +3154,7 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
     import yfinance as yf
 
     st.markdown(
-        shdr("Portfolio Backtest", "RSI oversold + uptrend entry strategy — no look-ahead bias"),
+        shdr("Portfolio Backtest", "Valuation-based entry strategy — buy the margin of safety, sell at target"),
         unsafe_allow_html=True,
     )
 
@@ -3191,18 +3162,19 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
     st.markdown(f"""
     <div style="background:{AMBER_LT};border-left:4px solid {AMBER};border-radius:8px;
                 padding:14px 18px;margin-bottom:18px;font-size:13px;color:{TEXT}">
-      <b>📊 How this backtest works (honest version)</b><br><br>
-      <b>Entry signal:</b> RSI(14) drops below 38 <i>while</i> price is above its 150-day moving average
-      — buying an oversold dip inside an established uptrend.<br>
-      <b>Exit:</b> +25% profit target · −12% stop loss · RSI > 72 overbought · or 120-day max hold.<br><br>
+      <b>📊 How this backtest works</b><br><br>
+      <b>Entry signal:</b> Price drops to or below <b>Entry Low</b> (Fair Value × 0.80) — the 20% margin
+      of safety level calculated by the DCF/Graham/EV engine.<br>
+      <b>Exit:</b> Price reaches <b>Target</b> (Fair Value × 1.20) — take profit · OR price falls to
+      <b>Stop Loss</b> (Entry Low × 0.92) — 8% hard stop below entry.<br><br>
       <b>⚠️ Known limitations (be honest with yourself):</b><br>
-      • <b>Survivorship bias</b> — this only tests stocks that still exist today. Companies that went
-        bankrupt or were delisted during the period are NOT included, so results look better than
-        real-world would have been.<br>
+      • <b>Static fair value</b> — uses <i>today's</i> DCF fair value applied to historical prices.
+        Actual fundamentals changed over the period, so treat results as illustrative of how the
+        valuation level has anchored price action, not a true historical simulation.<br>
+      • <b>Survivorship bias</b> — only tests stocks that still exist today. Delistings are excluded,
+        so results look better than real-world.<br>
       • <b>Slippage &amp; liquidity</b> — assumes perfect execution at close prices. Real fills are worse.<br>
-      • <b>Past ≠ future</b> — a strategy that worked historically can still fail going forward.<br><br>
-      The distress penalty (−5 to −15 pts per financial danger signal) applied during scoring already
-      pushes heavily distressed stocks out of the top-10 to reduce future delisting risk.
+      • <b>Past ≠ future</b> — a strategy that worked historically can still fail going forward.
     </div>
     """, unsafe_allow_html=True)
 
@@ -3273,10 +3245,6 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
                     hist_plot.index = hist_plot.index.tz_localize(None)
                 closes = hist_plot["Close"].squeeze().dropna()
 
-                # Build buy-and-hold equity curve
-                eq_curve = (closes / float(closes.iloc[0]) * 100)
-                equity_curves[t] = eq_curve
-
                 # Valuation levels
                 val_r = valuation.get(t, {})
                 entry_low = val_r.get("entry_low")
@@ -3294,11 +3262,33 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
                     compound = 1.0
                     for tr in closed:
                         compound *= (1 + tr["return_pct"] / 100)
-                    strat_ret = (compound - 1) * 100 if closed else (open_p["return_pct"] if open_p else bah_ret)
+                    strat_ret = (compound - 1) * 100 if closed else (open_p["return_pct"] if open_p else 0.0)
                     win_rate = (n_wins / len(trades) * 100) if trades else 0
+
+                    # Build strategy equity curve (cash=100, positions track price)
+                    eq_cash = 100.0
+                    eq_in_trade = False
+                    eq_entry_p = None
+                    eq_vals = []
+                    for _p in closes:
+                        _p = float(_p)
+                        if not eq_in_trade:
+                            if _p <= entry_low:
+                                eq_in_trade = True
+                                eq_entry_p = _p
+                            eq_vals.append(eq_cash)
+                        else:
+                            cur_eq = eq_cash * (_p / eq_entry_p)
+                            eq_vals.append(cur_eq)
+                            if _p >= target or _p <= stop_loss:
+                                eq_cash = cur_eq
+                                eq_in_trade = False
+                    equity_curves[t] = pd.Series(eq_vals, index=closes.index)
                 else:
-                    trades = []; strat_ret = bah_ret; win_rate = 0
+                    trades = []; strat_ret = 0.0; win_rate = 0
                     entry_low = target = stop_loss = fair_val = None
+                    # No valuation data — fall back to buy-and-hold curve
+                    equity_curves[t] = (closes / float(closes.iloc[0]) * 100)
 
                 stock_results[t] = {
                     "ticker":    t,
@@ -3414,7 +3404,7 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
 
     # ── Portfolio Equity Curve vs S&P 500 ─────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(shdr("Portfolio Equity Curve vs S&P 500", "Equal-weighted basket — base 100"), unsafe_allow_html=True)
+    st.markdown(shdr("Portfolio Equity Curve vs S&P 500", "Strategy equity (entry at MoS, exit at target/stop) vs benchmark — base 100"), unsafe_allow_html=True)
 
     try:
         fig = go.Figure()
