@@ -1,5 +1,7 @@
 # Stock Ranking Advisor v7
 
+[![Live App](https://img.shields.io/badge/Live%20App-investing--ml.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://investing-ml.streamlit.app/)
+
 ![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat-square&logo=python)
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.32%2B-FF4B4B?style=flat-square&logo=streamlit)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
@@ -14,6 +16,26 @@
 > **Dark "Wall Street terminal" UI** by default — feels like Bloomberg without the $24k/year bill.
 
 Scores up to **800 stocks** across your investor profile, runs a **7-gate Warren Buffett protocol**, computes intrinsic value via **4 independent valuation methods**, detects earnings manipulation via **Beneish M-Score**, monitors **9 live crash signals**, simulates **200 Monte Carlo paths**, backtests the strategy on historical prices, and delivers institutional-grade analysis — **for free**.
+
+---
+
+## Try It Live — No Installation Required
+
+**Don't want to clone a repo or touch a terminal? The full dashboard is hosted and ready to use:**
+
+### [investing-ml.streamlit.app](https://investing-ml.streamlit.app/)
+
+Open the link, set your investor profile in the sidebar (portfolio size, risk level, time horizon), hit **Run Analysis**, and get a full institutional-grade stock ranking in minutes — straight from your browser.
+
+**What you get on the live app:**
+- Complete 10-tab Streamlit dashboard with all features
+- Real-time data pulled fresh on every run (yfinance, SEC EDGAR, FRED, Finnhub, FMP)
+- Full valuation analysis — DCF, Graham Number, EV/EBITDA, FCF Yield
+- 9-signal crash detection + macro regime scoring
+- Portfolio construction with half-Kelly sizing and sector limits
+- Backtesting, earnings calendar, stock lookup — all included
+
+> **Note:** The hosted app runs on Streamlit Community Cloud (free tier). First-run analysis across 800 stocks can take 3–5 minutes as data is fetched live. Session history and watchlist data do not persist between restarts on the cloud — for persistent learning and the full CLI pipeline with Excel export and dark charts, run it locally (see [Setup](#setup) below).
 
 ---
 
@@ -41,20 +63,28 @@ Scores up to **800 stocks** across your investor profile, runs a **7-gate Warren
 
 ---
 
-## Two Ways to Run
+## Three Ways to Run
 
-### CLI Pipeline — terminal + 5 dark charts + Excel export
-```bash
-pip install -r requirements.txt
-python main.py
-```
+### Option 1 — Hosted Web App (no setup)
+**Just open the browser:** [investing-ml.streamlit.app](https://investing-ml.streamlit.app/)
+No Python, no terminal, no installation. Works on any device with a browser.
 
-### Streamlit Dashboard — browser-based, 10 interactive tabs
+### Option 2 — Local Streamlit Dashboard (full featured, persistent)
 ```bash
+git clone https://github.com/Justme-Cliff/Investing-ML.git
+cd Investing-ML
 pip install -r requirements.txt
 streamlit run app.py
 # Opens at http://localhost:8501
 ```
+Same 10-tab dashboard as the hosted version, plus persistent session learning across runs.
+
+### Option 3 — CLI Pipeline (terminal power users)
+```bash
+pip install -r requirements.txt
+python main.py
+```
+Full 16-step terminal pipeline with Rich output, 5 auto-generated dark-theme charts, Excel export, and an interactive REPL (`/stock`, `/compare`, `/chart`, `/macro` and more).
 
 ---
 
