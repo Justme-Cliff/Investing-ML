@@ -725,6 +725,17 @@ No paid data subscriptions required.
 
 ---
 
+## Support the Project
+
+If this tool has been useful for your investing research, consider supporting its development:
+
+- **Buy Me a Coffee:** [buymeacoffee.com/cliffpressw](https://buymeacoffee.com/cliffpressw)
+- **Cash App:** [$C2freshhh](https://cash.app/$C2freshhh)
+
+Every contribution helps keep the project free and actively maintained. Thank you!
+
+---
+
 ## Disclaimer
 
 This tool is for **educational and informational purposes only**.
