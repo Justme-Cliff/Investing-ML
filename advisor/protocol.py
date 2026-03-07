@@ -107,9 +107,9 @@ class ProtocolAnalyzer:
 
         if fail_c >= 3 or overall < 45:
             conviction = "LOW"
-        elif fail_c == 0 and pass_c >= 6 and overall >= 70:
+        elif fail_c <= 1 and pass_c >= 6 and overall >= 70:
             conviction = "HIGH"
-        elif fail_c <= 1 and pass_c >= 4:
+        elif fail_c <= 2 and pass_c >= 4:
             conviction = "MEDIUM"
         else:
             conviction = "LOW"

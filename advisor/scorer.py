@@ -202,6 +202,36 @@ class MultiFactorScorer:
             # Soft penalty of -15pts is insufficient when all 5 danger signals fire.
             df = df[df["distress_flags"] < 3].reset_index(drop=True)
 
+        # ── Price freshness penalty ───────────────────────────────────────────
+        # Stale prices (>7 days old) corrupt momentum and technical signals.
+        # price_freshness drops from 100 → 0 over 14 days of staleness.
+        # Penalty: (70 − freshness) × 0.10 pts. At freshness=0 → −7 pts.
+        if "price_freshness" in df.columns:
+            _stale = df["price_freshness"] < 70
+            if _stale.any():
+                _stale_pen = (70 - df.loc[_stale, "price_freshness"]) * 0.10
+                df.loc[_stale, "composite_score"] = (
+                    df.loc[_stale, "composite_score"] - _stale_pen
+                ).clip(lower=0)
+
+        # ── Earnings proximity adjustment ─────────────────────────────────────
+        # Stocks ≤7 days from earnings carry elevated event risk: one bad quarter
+        # can gap down -10% to -30% overnight regardless of prior score.
+        # Conservative profiles get a larger uncertainty discount; aggressive
+        # profiles get a smaller penalty (they accept event volatility).
+        # Penalty scale by risk level: 1→ -4pts, 2→ -2.5pts, 3→ -1pt, 4→ 0pt.
+        if "earnings_days_away" in df.columns:
+            _earn_penalty = {1: 4.0, 2: 2.5, 3: 1.0, 4: 0.0}
+            _ep = _earn_penalty.get(self.profile.risk_level, 2.0)
+            if _ep > 0:
+                _imminent = df["earnings_days_away"].apply(
+                    lambda x: x is not None and 0 <= int(x) <= 7
+                )
+                if _imminent.any():
+                    df.loc[_imminent, "composite_score"] = (
+                        df.loc[_imminent, "composite_score"] - _ep
+                    ).clip(lower=0)
+
         if self.profile.income_focused:
             df["composite_score"] += df["dividend_score"] * 0.08
             df["composite_score"]  = df["composite_score"].clip(upper=100)
@@ -297,13 +327,15 @@ class MultiFactorScorer:
         _eps_surp  = data.get("earnings_surprise_avg")
         if _beat_rate is not None and _eps_surp is not None:
             _br, _es = float(_beat_rate), float(_eps_surp)
-            if _br > 0.65 and _es > 2.0:
+            # NOTE: earnings_surprise_avg from Finnhub is a ratio (0.05 = 5% surprise),
+            # not a percentage. Threshold 0.02 = 2% beat; divisor 1.5 preserves magnitude.
+            if _br > 0.65 and _es > 0.02:
                 # Analysts systematically too low → keep beating → sustained alpha
-                _fwd = min(0.05, (_br - 0.50) * _es / 150.0)
+                _fwd = min(0.05, (_br - 0.50) * _es / 1.5)
                 momentum_raw += _fwd
-            elif _br < 0.35 and _es < -2.0:
+            elif _br < 0.35 and _es < -0.02:
                 # Analysts systematically too high → chronic disappointments ahead
-                _fwd = -min(0.05, (0.50 - _br) * abs(_es) / 150.0)
+                _fwd = -min(0.05, (0.50 - _br) * abs(_es) / 1.5)
                 momentum_raw += _fwd
 
         # 52-Week High Momentum (George & Hwang 2004)
@@ -545,6 +577,8 @@ class MultiFactorScorer:
             "div_pct":             div * 100,
             "distress_flags":      distress,
             "data_quality_score":  float(data.get("data_quality_score", 100.0)),
+            "price_freshness":     float(data.get("price_freshness", 100.0)),
+            "earnings_days_away":  data.get("earnings_days_away"),
         }
 
     # ── Helpers ───────────────────────────────────────────────────────────────

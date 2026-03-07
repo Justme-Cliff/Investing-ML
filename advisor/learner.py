@@ -278,7 +278,7 @@ class SessionMemory:
                     "fair_value":  v.get("fair_value"),
                     "entry_low":   v.get("entry_low"),
                     "entry_high":  v.get("entry_high"),
-                    "target":      v.get("target"),
+                    "target":      v.get("target_price"),
                     "stop_loss":   v.get("stop_loss"),
                     "signal":      v.get("signal"),
                     "upside_pct":  v.get("upside_pct"),
@@ -807,7 +807,7 @@ class SessionMemory:
         try:
             sink = io.StringIO()
             with contextlib.redirect_stderr(sink):
-                hist = yf.Ticker(ticker).history(period="2d")
+                hist = yf.Ticker(ticker).history(period="5d")
             if hist is not None and len(hist) > 0:
                 return float(hist["Close"].iloc[-1])
         except Exception:

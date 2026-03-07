@@ -33,6 +33,9 @@ memory/universe_cache.json
 memory/settings.json
 memory/watchlist.json
 
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
+
 # ── OS & editor ───────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

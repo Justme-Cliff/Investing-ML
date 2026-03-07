@@ -201,6 +201,7 @@ def fetch_alpha_vantage_earnings(ticker: str) -> dict:
         if not quarterly:
             return {}
         beats = 0
+        valid_q = 0
         surprises = []
         for q in quarterly:
             try:
@@ -211,6 +212,7 @@ def fetch_alpha_vantage_earnings(ticker: str) -> dict:
                     continue
                 a, e = float(reported), float(estimated)
                 if abs(e) > 0.001:
+                    valid_q += 1
                     if a > e:
                         beats += 1
                     if surprise_pct not in (None, "None", ""):
@@ -218,8 +220,8 @@ def fetch_alpha_vantage_earnings(ticker: str) -> dict:
             except Exception:
                 pass
         out = {}
-        if quarterly:
-            out["av_eps_beat_rate"] = beats / len(quarterly)
+        if valid_q > 0:
+            out["av_eps_beat_rate"] = beats / valid_q
         if surprises:
             out["av_eps_surprise_avg"] = float(np.mean(surprises))
         time.sleep(12)   # respect 25 calls/day free limit
@@ -414,21 +416,28 @@ def enrich_top_n(
     total = len(top_tickers)
     print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC · Smart Money)...")
 
-    # Build SEC CIK map once for smart money lookups
+    # Build SEC CIK map once for smart money lookups.
+    # Also populate the module-level _SEC_CIK_CACHE so that fetch_sec_revenue_trend()
+    # can reuse it without making a second HTTP request to SEC.
+    global _SEC_CIK_CACHE
     _cik_map: dict = {}
-    try:
-        r_cik = requests.get(
-            "https://www.sec.gov/files/company_tickers.json",
-            headers={"User-Agent": "StockAdvisor contact@stockadvisor.local"},
-            timeout=10,
-        )
-        if r_cik.status_code == 200:
-            _cik_map = {
-                v["ticker"].upper(): str(v["cik_str"])
-                for v in r_cik.json().values()
-            }
-    except Exception:
-        pass
+    if _SEC_CIK_CACHE:
+        _cik_map = _SEC_CIK_CACHE   # already loaded from a prior call
+    else:
+        try:
+            r_cik = requests.get(
+                "https://www.sec.gov/files/company_tickers.json",
+                headers={"User-Agent": "StockAdvisor contact@stockadvisor.local"},
+                timeout=10,
+            )
+            if r_cik.status_code == 200:
+                _cik_map = {
+                    v["ticker"].upper(): str(v["cik_str"])
+                    for v in r_cik.json().values()
+                }
+                _SEC_CIK_CACHE = _cik_map   # share with _get_sec_cik() — no re-download
+        except Exception:
+            pass
 
     def _bar(done: int, step: str = "", ticker: str = "") -> None:
         pct    = done / total * 100

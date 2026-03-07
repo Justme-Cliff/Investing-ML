@@ -78,15 +78,15 @@ class InputCollector:
     def _welcome(self):
         print("""
 ╔══════════════════════════════════════════════════════════════╗
-║         PERSONALIZED  STOCK  RANKING  ADVISOR  v2           ║
+║         PERSONALIZED  STOCK  RANKING  ADVISOR  v7           ║
 ║  7-factor model · macro regime · learning memory · Excel    ║
-║  Real-time data from Yahoo Finance  ·  No API key needed    ║
+║  800+ tickers · 7 data sources · No paid API required       ║
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
     # ── Q1: Portfolio size ────────────────────────────────────────────────────
     def _ask_size(self) -> float:
-        _sep("QUESTION 1 of 7 — Portfolio Size")
+        _sep("QUESTION 1 of 8 — Portfolio Size")
         print("  How much are you planning to invest?")
         print("  Accepts: 5000  ·  10k  ·  1.5m  ·  $50,000\n")
         while True:
@@ -117,7 +117,7 @@ class InputCollector:
 
     # ── Q2: Time horizon ──────────────────────────────────────────────────────
     def _ask_horizon(self) -> Tuple[str, int, str]:
-        _sep("QUESTION 2 of 7 — Investment Time Horizon")
+        _sep("QUESTION 2 of 8 — Investment Time Horizon")
         print("  1.  Short  term  (up to 1 year)   — riding near-term momentum")
         print("  2.  Medium term  (2–5 years)       — balanced growth & stability")
         print("  3.  Long   term  (6+ years)        — compounding fundamentals\n")
@@ -134,7 +134,7 @@ class InputCollector:
 
     # ── Q3: Risk tolerance ────────────────────────────────────────────────────
     def _ask_risk(self) -> Tuple[str, int]:
-        _sep("QUESTION 3 of 7 — Risk Tolerance")
+        _sep("QUESTION 3 of 8 — Risk Tolerance")
         print("  1.  Low / Conservative      — Capital preservation, steady income")
         print("  2.  Moderate / Balanced     — Growth + stability, some volatility OK")
         print("  3.  High / Aggressive       — Growth-focused, comfortable with big swings")
@@ -157,7 +157,7 @@ class InputCollector:
 
     # ── Q4: Investment goal ───────────────────────────────────────────────────
     def _ask_goal(self) -> Tuple[str, str]:
-        _sep("QUESTION 4 of 7 — Primary Investment Goal")
+        _sep("QUESTION 4 of 8 — Primary Investment Goal")
         print("  1.  Retirement / FIRE        — Long horizon, protect capital near end")
         print("  2.  Long-term Wealth Build   — Compound returns over decades")
         print("  3.  Income & Dividends       — Cash flow, steady quarterly payments")
@@ -182,7 +182,7 @@ class InputCollector:
 
     # ── Q5: Drawdown gut check ────────────────────────────────────────────────
     def _ask_drawdown(self) -> float:
-        _sep("QUESTION 5 of 7 — Emotional Risk Check")
+        _sep("QUESTION 5 of 8 — Emotional Risk Check")
         print("  Imagine your portfolio drops 30% in 3 months. What do you do?")
         print("  1.  Buy more aggressively   — I see it as a sale  (drawdown: 40%)")
         print("  2.  Hold steady             — I trust the thesis   (drawdown: 25%)")
@@ -198,7 +198,7 @@ class InputCollector:
 
     # ── Q6: Sector preferences ────────────────────────────────────────────────
     def _ask_sectors(self) -> Tuple[List[str], List[str]]:
-        _sep("QUESTION 6 of 7 — Sector Preferences (optional)")
+        _sep("QUESTION 6 of 8 — Sector Preferences (optional)")
         print("  Available sectors:")
         for i, s in enumerate(self.ALL_SECTORS, 1):
             print(f"    {i:2}.  {s}")
@@ -238,7 +238,7 @@ class InputCollector:
 
     # ── Q7: Existing holdings ─────────────────────────────────────────────────
     def _ask_existing(self) -> List[str]:
-        _sep("QUESTION 7 of 7 — Existing Holdings (optional)")
+        _sep("QUESTION 7 of 8 — Existing Holdings (optional)")
         print("  List any stocks you already own so I can avoid recommending them.")
         print("  (e.g. 'AAPL, MSFT, NVDA')  Press Enter to skip.\n")
         raw = input("  Tickers: ").strip().upper()
