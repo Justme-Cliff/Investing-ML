@@ -225,7 +225,7 @@ class MultiFactorScorer:
             _ep = _earn_penalty.get(self.profile.risk_level, 2.0)
             if _ep > 0:
                 _imminent = df["earnings_days_away"].apply(
-                    lambda x: x is not None and 0 <= int(x) <= 7
+                    lambda x: x is not None and not (isinstance(x, float) and __import__('math').isnan(x)) and 0 <= int(x) <= 7
                 )
                 if _imminent.any():
                     df.loc[_imminent, "composite_score"] = (
