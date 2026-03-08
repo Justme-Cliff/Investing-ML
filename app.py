@@ -698,6 +698,39 @@ def _generate_quant_thesis(ticker: str, val: dict, risk: dict, proto_dict: dict)
     return thesis
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ANTI-THESIS HTML RENDERER
+# ─────────────────────────────────────────────────────────────────────────────
+def _anti_thesis_html(flags: list) -> str:
+    """
+    Render Anti-Thesis Engine red flags as styled HTML cards.
+    Each flag: {flag, severity, detail}
+    """
+    if not flags:
+        return ""
+    SEV_CLR    = {"HIGH": RED,       "MEDIUM": AMBER,  "LOW": MUTED}
+    SEV_BG     = {"HIGH": "#1A0606", "MEDIUM": "#1A1100", "LOW": "#0D0F14"}
+    SEV_BORDER = {"HIGH": RED,       "MEDIUM": AMBER,  "LOW": MUTED}
+    items = ""
+    for f in flags:
+        sev = f.get("severity", "MEDIUM")
+        clr = SEV_CLR.get(sev, MUTED)
+        bg  = SEV_BG.get(sev, "#0D0F14")
+        brd = SEV_BORDER.get(sev, MUTED)
+        items += (
+            f'<div style="background:{bg};border:1px solid {brd}44;border-left:3px solid {brd};'
+            f'border-radius:6px;padding:10px 14px;margin-bottom:8px">'
+            f'  <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">'
+            f'    <span style="font-size:10px;font-weight:800;text-transform:uppercase;'
+            f'letter-spacing:.09em;color:{clr};background:{brd}22;padding:2px 8px;border-radius:3px">{sev}</span>'
+            f'    <span style="font-size:13px;font-weight:700;color:{TEXT}">{f["flag"]}</span>'
+            f'  </div>'
+            f'  <div style="font-size:12px;color:{MUTED};line-height:1.65">{f["detail"]}</div>'
+            f'</div>'
+        )
+    return items
+
+
 def _analyst_targets_html(info: dict) -> str:
     """Render analyst target price distribution as styled HTML."""
     mean_t = info.get("targetMeanPrice")
@@ -1002,7 +1035,8 @@ def run_analysis(profile: UserProfile) -> dict:
     constructor  = PortfolioConstructor(n=PORTFOLIO_N)
     top10        = constructor.select(res["ranked_df"], res["universe_data"], profile.risk_level)
     res["top10"] = constructor.size_positions(top10, profile.portfolio_size,
-                                               macro_data=res.get("macro_data"))
+                                               macro_data=res.get("macro_data"),
+                                               universe_data=res.get("universe_data"))
     prog.progress(66, text="Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF)…")
 
     res["valuation"] = ValuationEngine(rf_rate).analyze_all(res["top10"], res["universe_data"])
@@ -1620,7 +1654,7 @@ def tab_valuation(top10, valuation):
 def tab_risk(top10, risk, universe_data=None):
     st.markdown(
         shdr("Risk & Quality Metrics",
-             "Altman Z · Sharpe · Sortino · Max Drawdown · VaR 95% · ROIC/WACC · Piotroski"),
+             "Altman Z · Sharpe · Sortino · Max DD · VaR 95% · CVaR 95% · ROIC/WACC · Piotroski"),
         unsafe_allow_html=True,
     )
 
@@ -1637,7 +1671,14 @@ def tab_risk(top10, risk, universe_data=None):
         rw_clr = GREEN if (rw_sp or 0) > 5 else AMBER if (rw_sp or 0) > 0 else RED
         sh     = r.get("sharpe")
         sh_clr = GREEN if (sh or 0) > 1 else AMBER if (sh or 0) > 0 else RED
-        z_badge = zone_badge(az.get("zone", "—")) if az.get("zone") else "—"
+        z_badge  = zone_badge(az.get("zone", "—")) if az.get("zone") else "—"
+        rt_data  = r.get("roic_trend", {})
+        rt_trend = rt_data.get("trend", "—")
+        rt_clr   = GREEN if rt_trend in ("EXPANDING", "IMPROVING") else RED if rt_trend in ("NEGATIVE", "CONTRACTING") else MUTED
+        beneish  = r.get("beneish")
+        bm_score = beneish.get("m_score") if beneish else None
+        bm_clr   = RED if (bm_score is not None and bm_score > -1.78) else GREEN
+        bm_str   = f"{bm_score:.2f}" if bm_score is not None else "—"
         rows += (
             f'<tr>'
             f'<td><b>{t}</b></td>'
@@ -1647,18 +1688,21 @@ def tab_risk(top10, risk, universe_data=None):
             f'<td style="font-family:monospace">{fmt_2(r.get("sortino"))}</td>'
             f'<td style="font-family:monospace;color:{RED}">{fmt_pct(r.get("max_drawdown_pct"), False)}</td>'
             f'<td style="font-family:monospace;color:{AMBER}">{fmt_pct(r.get("var_95_pct"), False)}</td>'
+            f'<td style="font-family:monospace;color:{RED};font-weight:600">{fmt_pct(r.get("cvar_95_pct"), False)}</td>'
             f'<td style="font-family:monospace;color:{rw_clr};font-weight:700">{fmt_pct(rw_sp)}</td>'
             f'<td style="font-size:11px;color:{MUTED}">{rw.get("verdict","—")}</td>'
             f'<td style="font-weight:700;color:{pf_clr}">'
             f'{pf_sc if pf_sc is not None else "—"}/9</td>'
             f'<td style="font-family:monospace;color:{MUTED}">{fmt_2(r.get("accruals"))}</td>'
+            f'<td style="font-size:11px;font-weight:700;color:{rt_clr}">{rt_trend}</td>'
+            f'<td style="font-family:monospace;color:{bm_clr};font-weight:600">{bm_str}</td>'
             f'</tr>'
         )
     st.markdown(
         f'<table class="qt"><thead><tr>'
         f'<th>Ticker</th><th>Altman Z</th><th>Zone</th>'
-        f'<th>Sharpe</th><th>Sortino</th><th>Max DD</th><th>VaR 95%</th>'
-        f'<th>ROIC/WACC</th><th>Verdict</th><th>Piotroski</th><th>Accruals</th>'
+        f'<th>Sharpe</th><th>Sortino</th><th>Max DD</th><th>VaR 95%</th><th>CVaR 95%</th>'
+        f'<th>ROIC/WACC</th><th>Verdict</th><th>ROIC Trend</th><th>Piotroski</th><th>Accruals</th><th>Beneish M</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>',
         unsafe_allow_html=True,
     )
@@ -1747,6 +1791,156 @@ def tab_risk(top10, risk, universe_data=None):
                          "200 paths · 252 trading days · Equal-weighted top-10"),
                     unsafe_allow_html=True)
         st.plotly_chart(_monte_carlo_chart(top10, universe_data), use_container_width=True)
+
+    # ── Anti-Thesis Overview ──────────────────────────────────────────────────
+    if universe_data:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            shdr("Anti-Thesis Overview",
+                 "Structural red flags challenging each Buy signal — HIGH = thesis-breaking risk"),
+            unsafe_allow_html=True,
+        )
+        from advisor.risk import RiskEngine as _REAT
+        _re_at = _REAT()
+        at_rows = ""
+        for _, row in top10.iterrows():
+            t    = row["ticker"]
+            data = universe_data.get(t, {})
+            if not data:
+                continue
+            r_t    = risk.get(t, {})
+            flags  = _re_at.anti_thesis(t, data.get("info", {}), data.get("history"), r_t, data)
+            high_c = sum(1 for f in flags if f["severity"] == "HIGH")
+            med_c  = sum(1 for f in flags if f["severity"] == "MEDIUM")
+            top3   = " · ".join(f['flag'] for f in flags[:3]) if flags else "No red flags"
+            flag_clr = RED if high_c > 0 else AMBER if med_c > 0 else GREEN
+            at_rows += (
+                f'<tr>'
+                f'<td><b>{t}</b></td>'
+                f'<td style="font-weight:700;color:{RED}">{high_c}</td>'
+                f'<td style="font-weight:700;color:{AMBER}">{med_c}</td>'
+                f'<td style="font-size:12px;color:{MUTED}">{top3}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table class="qt"><thead><tr>'
+            f'<th>Ticker</th><th style="color:{RED}">HIGH flags</th>'
+            f'<th style="color:{AMBER}">MEDIUM flags</th><th>Top flags</th>'
+            f'</tr></thead><tbody>{at_rows}</tbody></table>',
+            unsafe_allow_html=True,
+        )
+
+    # ── Tail-Risk Stress Testing ──────────────────────────────────────────────
+    if universe_data:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            shdr("Tail-Risk Stress Testing",
+                 "CVaR = expected loss in worst 5% · Rate shock = +200bps beta-scaled · Recession = worst 2% hist"),
+            unsafe_allow_html=True,
+        )
+        from advisor.risk import RiskEngine as _RETail
+        tail = _RETail().portfolio_tail_risk(top10["ticker"].tolist(), universe_data)
+
+        # Portfolio-level CVaR vs VaR tiles
+        p_cvar = tail.get("portfolio_cvar")
+        p_var  = tail.get("portfolio_var")
+        tc1, tc2, tc3 = st.columns(3)
+        with tc1:
+            st.markdown(
+                mtile("Portfolio CVaR 95%",
+                      f"{p_cvar:.1f}%" if p_cvar is not None else "n/a",
+                      "Expected loss in worst 5% of months", RED, RED),
+                unsafe_allow_html=True,
+            )
+        with tc2:
+            st.markdown(
+                mtile("Portfolio VaR 95%",
+                      f"{p_var:.1f}%" if p_var is not None else "n/a",
+                      "Threshold loss at 95% confidence", AMBER, AMBER),
+                unsafe_allow_html=True,
+            )
+        with tc3:
+            tail_ratio = None
+            if p_cvar is not None and p_var is not None and p_var != 0:
+                tail_ratio = round(abs(p_cvar) / abs(p_var), 2)
+            st.markdown(
+                mtile("CVaR / VaR Ratio",
+                      f"{tail_ratio:.2f}×" if tail_ratio is not None else "n/a",
+                      "Tail severity multiplier (>1.3 = fat tails)", MUTED, BLUE),
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Stress scenario table
+        stress = tail.get("stress_scenarios", {})
+        worst_avg = tail.get("worst_day_avg", {})
+        s_rows = ""
+        for _, row in top10.iterrows():
+            t   = row["ticker"]
+            sc  = stress.get(t, {})
+            rs  = sc.get("rate_shock_pct")
+            rec = sc.get("recession_pct")
+            liq = sc.get("liquidity_pct")
+            bt  = sc.get("beta")
+            wd  = worst_avg.get(t)
+            cvar_t = risk.get(t, {}).get("cvar_95_pct")
+            def _c(v): return RED if v is not None and v < -15 else AMBER if v is not None and v < -8 else MUTED
+            s_rows += (
+                f'<tr>'
+                f'<td><b>{t}</b></td>'
+                f'<td style="font-family:monospace;color:{MUTED}">{bt if bt is not None else "—"}</td>'
+                f'<td style="font-family:monospace;color:{RED if cvar_t and cvar_t < -10 else AMBER}">'
+                f'{fmt_pct(cvar_t, False)}</td>'
+                f'<td style="font-family:monospace;color:{_c(rs)}">{fmt_pct(rs, False) if rs is not None else "—"}</td>'
+                f'<td style="font-family:monospace;color:{_c(rec)}">{fmt_pct(rec, False) if rec is not None else "—"}</td>'
+                f'<td style="font-family:monospace;color:{_c(liq)}">{fmt_pct(liq, False) if liq is not None else "—"}</td>'
+                f'<td style="font-family:monospace;color:{RED if wd and wd < -2 else MUTED}">'
+                f'{f"{wd:+.2f}%" if wd is not None else "—"}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table class="qt"><thead><tr>'
+            f'<th>Ticker</th><th>Beta</th><th>CVaR 95%</th>'
+            f'<th>Rate Shock</th><th>Recession</th><th>Liq. Crunch</th><th>Worst-Day Avg</th>'
+            f'</tr></thead><tbody>{s_rows}</tbody></table>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div style="font-size:11px;color:{MUTED2};margin-top:8px">'
+            f'Rate Shock = +200bps, beta-scaled. Recession = worst 2% historical monthly return. '
+            f'Liq. Crunch = VaR × 1.5 stress multiplier. Worst-Day Avg = avg return on portfolio\'s worst 10% days.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Per-stock CVaR bar chart
+        tickers_list = [row["ticker"] for _, row in top10.iterrows()]
+        cvar_vals    = [risk.get(t, {}).get("cvar_95_pct") for t in tickers_list]
+        var_vals     = [risk.get(t, {}).get("var_95_pct")  for t in tickers_list]
+        if any(v is not None for v in cvar_vals):
+            st.markdown("<br>", unsafe_allow_html=True)
+            fig_tail = go.Figure()
+            fig_tail.add_trace(go.Bar(
+                name="VaR 95%", x=tickers_list,
+                y=[v if v is not None else 0 for v in var_vals],
+                marker_color=AMBER, opacity=0.75,
+                hovertemplate="<b>%{x}</b><br>VaR 95%: %{y:.1f}%<extra></extra>",
+            ))
+            fig_tail.add_trace(go.Bar(
+                name="CVaR 95%", x=tickers_list,
+                y=[v if v is not None else 0 for v in cvar_vals],
+                marker_color=RED, opacity=0.85,
+                hovertemplate="<b>%{x}</b><br>CVaR 95%: %{y:.1f}%<extra></extra>",
+            ))
+            fig_tail.update_layout(
+                **_plotly_base(), barmode="group", height=300,
+                margin=dict(l=0, r=0, t=6, b=40),
+                legend=dict(orientation="h", y=1.08, font=dict(size=11)),
+                yaxis=dict(title="Monthly Loss (%)", gridcolor="#1E2535"),
+                xaxis=dict(tickfont=dict(size=11, family="monospace")),
+            )
+            st.plotly_chart(fig_tail, use_container_width=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2570,6 +2764,27 @@ def _render_stock_detail(
             unsafe_allow_html=True,
         )
 
+    # ── ANTI-THESIS ───────────────────────────────────────────────────────────
+    from advisor.risk import RiskEngine as _RiskEngineAT
+    _at_flags = _RiskEngineAT().anti_thesis(ticker, info, hist, r, data)
+    if _at_flags:
+        _high_count = sum(1 for f in _at_flags if f["severity"] == "HIGH")
+        _expander_label = (
+            f"Anti-Thesis — {len(_at_flags)} risk flag{'s' if len(_at_flags) != 1 else ''} "
+            f"({_high_count} HIGH)" if _high_count else
+            f"Anti-Thesis — {len(_at_flags)} risk flag{'s' if len(_at_flags) != 1 else ''}"
+        )
+        with st.expander(_expander_label, expanded=_high_count > 0):
+            st.markdown(
+                f'<div style="background:#0A0D14;border:1px solid {RED}33;border-left:4px solid {RED};'
+                f'border-radius:10px;padding:14px 18px 6px;margin-bottom:4px">'
+                f'<div style="font-size:10px;font-weight:800;text-transform:uppercase;'
+                f'letter-spacing:.10em;color:{RED};margin-bottom:10px">Bear Case / Risk Flags</div>'
+                f'{_anti_thesis_html(_at_flags)}'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
     # ── BUSINESS DESCRIPTION ──────────────────────────────────────────────────
     desc = (info.get("longBusinessSummary") or "")[:420]
     if desc:
@@ -2767,6 +2982,50 @@ def _render_stock_detail(
         st.markdown(
             f'<div style="border:1px solid {BORDER};border-radius:10px;overflow:hidden;margin-bottom:22px">'
             f'<table style="width:100%;border-collapse:collapse"><tbody>{s_rows}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── REVERSE DCF ───────────────────────────────────────────────────────────
+    _rdcf = val.get("reverse_dcf")
+    if _rdcf:
+        _ig   = _rdcf.get("implied_growth")
+        _rg   = _rdcf.get("realistic_growth")
+        _gap  = _rdcf.get("gap_pct")
+        _verd = _rdcf.get("verdict", "")
+        _rdcf_clr = {
+            "OVERPRICED":        RED,
+            "STRETCHED":         AMBER,
+            "FAIR":              MUTED,
+            "ATTRACTIVE":        GREEN,
+            "DEEPLY_UNDERVALUED": "#10B981",
+        }.get(_verd, MUTED)
+        st.markdown(
+            f'<div style="background:#0A0D14;border:1px solid {_rdcf_clr}44;'
+            f'border-left:4px solid {_rdcf_clr};border-radius:10px;'
+            f'padding:14px 20px;margin-bottom:18px">'
+            f'<div style="font-size:10px;font-weight:800;text-transform:uppercase;'
+            f'letter-spacing:.10em;color:{_rdcf_clr};margin-bottom:10px">Reverse DCF — Implied Growth Analysis</div>'
+            f'<div style="display:flex;gap:32px;flex-wrap:wrap">'
+            f'  <div><div style="font-size:11px;color:{MUTED2}">Market-Implied Growth</div>'
+            f'     <div style="font-size:22px;font-weight:800;color:{_rdcf_clr}">'
+            f'     {f"{_ig:+.1f}%" if _ig is not None else "n/a"}</div></div>'
+            f'  <div><div style="font-size:11px;color:{MUTED2}">Realistic / Analyst Est.</div>'
+            f'     <div style="font-size:22px;font-weight:800;color:{TEXT}">'
+            f'     {f"{_rg:+.1f}%" if _rg is not None else "n/a"}</div></div>'
+            f'  <div><div style="font-size:11px;color:{MUTED2}">Gap (Implied − Realistic)</div>'
+            f'     <div style="font-size:22px;font-weight:800;color:{_rdcf_clr}">'
+            f'     {f"{_gap:+.1f}%" if _gap is not None else "n/a"}</div></div>'
+            f'  <div><div style="font-size:11px;color:{MUTED2}">Verdict</div>'
+            f'     <div style="font-size:14px;font-weight:800;color:{_rdcf_clr};'
+            f'     padding:4px 10px;background:{_rdcf_clr}22;border-radius:4px;margin-top:6px">'
+            f'     {_verd.replace("_"," ")}</div></div>'
+            f'</div>'
+            f'<div style="font-size:11px;color:{MUTED2};margin-top:10px">'
+            f'The market is pricing in <b style="color:{_rdcf_clr}">{f"{_ig:+.1f}%" if _ig is not None else "n/a"}</b> annual FCF growth. '
+            f'If the company actually grows at <b>{f"{_rg:+.1f}%" if _rg is not None else "n/a"}</b>, '
+            f'{"the stock is overvalued by the implied growth gap." if (_gap or 0) > 0 else "the stock is undervalued — growth is priced in cheaply."}'
+            f'</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 

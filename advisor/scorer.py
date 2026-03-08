@@ -286,14 +286,26 @@ class MultiFactorScorer:
                 0.45 * (r6m or 0.0)
             )
 
-        # Short interest nudge: >15% short float signals squeeze potential or
-        # crowded short confirming weakness depending on momentum direction
+        # Short Squeeze Score — progressive multi-factor signal
+        # Activates from 8% short float (not just >15%).
+        # Components: short interest level + volume surge (when available)
+        # Direction-aware: squeeze fuel if momentum positive, confirmation if negative.
         short_pct = float(info.get("shortPercentOfFloat") or 0)
-        if short_pct > 0.15:
+        if short_pct > 0.08:
+            # Scale 0→0.10 over 8%→28% short float
+            short_base  = min(0.10, (short_pct - 0.08) * 0.50)
+            # Volume surge: current volume vs 3-month average
+            avg_vol = info.get("averageVolume")
+            cur_vol = info.get("volume")
+            vol_surge = 0.0
+            if avg_vol and cur_vol and float(avg_vol) > 0:
+                vol_ratio = float(cur_vol) / float(avg_vol)
+                vol_surge = min(0.04, max(0.0, (vol_ratio - 1.2) * 0.04))
+            squeeze = short_base + vol_surge
             if momentum_raw > 0:
-                momentum_raw += 0.05   # squeeze fuel
+                momentum_raw += squeeze          # squeeze fuel: price rising into heavy shorts
             else:
-                momentum_raw -= 0.05   # short interest confirming weakness
+                momentum_raw -= squeeze * 0.60   # short thesis winning: confirmed weakness
 
         # Relative sector strength: outperformance vs sector ETF → momentum boost
         sector_etf_perf = self.macro_data.get("sector_etf", {})
@@ -487,12 +499,28 @@ class MultiFactorScorer:
                 quality_raw -= min(0.10, (ag - 0.15) * 0.25)
 
         # ── Source 1f: EPS consistency (consecutive years of growth) ─────────
-        # Consecutive EPS growth is one of the cleanest proxies for a durable
-        # competitive advantage. 4 straight years = maximum bonus (+0.08).
-        # This rewards compounders that grow earnings through full market cycles.
         eps_cons = data.get("eps_consistency")
         if eps_cons is not None:
             quality_raw += min(0.08, int(eps_cons) / 4.0 * 0.08)
+
+        # ── Source 1g: ROIC Trend (margin trajectory) ──────────────────────
+        # A business with ROIC improving from 8%→12% over 3 years is a better
+        # buy than one declining 25%→15% even if current levels look similar.
+        # Proxy: earnings growing faster than revenue = margin expansion = improving ROIC.
+        _roa    = info.get("returnOnAssets")
+        _rev_g  = float(info.get("revenueGrowth")  or 0)
+        _earn_g = float(info.get("earningsGrowth") or 0)
+        if _roa is not None:
+            _roa_v = float(_roa)
+            _gap   = _earn_g - _rev_g
+            if _roa_v > 0.12 and _gap > 0.05:
+                quality_raw += 0.06   # ROIC expanding: strong level + improving margins
+            elif _roa_v > 0.06 and _gap > 0.0:
+                quality_raw += 0.03   # ROIC improving: adequate level + trending up
+            elif _gap < -0.10:
+                quality_raw -= 0.05   # ROIC contracting: margin compression
+            elif _roa_v < 0:
+                quality_raw -= 0.08   # ROIC negative: destroying value
 
         # ── 5. Technical (pre-computed with Bollinger + OBV) ──────────────────
         technical_raw = data.get("technical", 50.0) / 100

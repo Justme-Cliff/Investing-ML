@@ -208,7 +208,9 @@ def main():
     # ── 6. Correlation-aware selection + Kelly position sizing ────────────────
     constructor = PortfolioConstructor(n=PORTFOLIO_N)
     top10       = constructor.select(ranked_df, universe_data, profile.risk_level)
-    top10_sized = constructor.size_positions(top10, profile.portfolio_size, macro_data=macro_data)
+    top10_sized = constructor.size_positions(top10, profile.portfolio_size,
+                                             macro_data=macro_data,
+                                             universe_data=universe_data)
 
     # ── 7. Terminal display: quantitative results ─────────────────────────────
     display.show_results(top10_sized)

@@ -147,7 +147,7 @@ class PortfolioConstructor:
         return final
 
     def size_positions(self, top10: pd.DataFrame, portfolio_size: float,
-                       macro_data: dict = None) -> pd.DataFrame:
+                       macro_data: dict = None, universe_data: dict = None) -> pd.DataFrame:
         """Add weight%, dollar amount, approx shares columns using half-Kelly sizing.
 
         VIX-scaled Kelly: when VIX > 20, raw Kelly fractions are scaled down by
@@ -189,16 +189,42 @@ class PortfolioConstructor:
 
         vol_floor = max(0.0, vix_implied + dd_penalty)   # 0 when no macro_data
 
-        # ── Half-Kelly: edge / variance / 2 ──────────────────────────────────
-        # Variance uses max(hist_vol, vix_floor) so Kelly is automatically more
-        # conservative when implied vol (VIX) exceeds realised vol — the typical
-        # condition in crashes where future vol is underpriced by historical data.
+        # ── CVaR-adjusted Kelly sizing ────────────────────────────────────────
+        # Standard Kelly uses vol^2. CVaR-adjusted Kelly uses max(hist_vol, cvar_vol)
+        # as the effective volatility — more conservative when tail risk is elevated.
+        # CVaR captures crash severity; vol does not. In fat-tail conditions
+        # (CVaR >> VaR), the effective denominator grows, naturally sizing down
+        # the riskiest positions even if their average returns look attractive.
+        #
+        # Convert monthly CVaR → annualised vol equivalent:
+        #   cvar_annual_vol = |cvar_monthly| × sqrt(12)
+        # Then use max(hist_vol, vix_floor, cvar_annual_vol) as floor.
+        cvar_map: dict = {}
+        if universe_data:
+            for _t in df["ticker"]:
+                _ud = universe_data.get(_t, {})
+                _hist = _ud.get("history")
+                if _hist is not None and not _hist.empty:
+                    _close = _hist["Close"].dropna()
+                    if len(_close) >= 63:
+                        _monthly = _close.pct_change(21).dropna()
+                        if len(_monthly) >= 10:
+                            _cut  = float(_monthly.quantile(0.05))
+                            _tail = _monthly[_monthly <= _cut]
+                            if len(_tail) > 0:
+                                cvar_map[_t] = abs(float(_tail.mean()))
+
         kelly_raw = []
         for _, row in df.iterrows():
+            _t       = row["ticker"]
             edge     = float(row["composite_score"]) / 100
             hist_vol = float(row["vol"])
-            eff_vol  = max(hist_vol, vol_floor)    # use VIX-implied vol as floor
-            var      = max(eff_vol ** 2, 0.01)
+            eff_vol  = max(hist_vol, vol_floor)
+            if _t in cvar_map:
+                # Annualise monthly CVaR and use as volatility floor
+                cvar_vol = cvar_map[_t] * (12 ** 0.5)
+                eff_vol  = max(eff_vol, cvar_vol)
+            var = max(eff_vol ** 2, 0.01)
             kelly_raw.append(edge / var / 2)
 
         total_k = sum(kelly_raw)

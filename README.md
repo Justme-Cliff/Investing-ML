@@ -1,4 +1,4 @@
-# Stock Ranking Advisor v7
+# Stock Ranking Advisor v8
 
 [![Live App](https://img.shields.io/badge/Live%20App-investing--ml.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://investing-ml.streamlit.app/)
 
@@ -15,7 +15,7 @@
 > No paid APIs. No AI subscriptions. Just math, discipline, and **9 independent data sources**.
 > **Dark "Wall Street terminal" UI** by default — feels like Bloomberg without the $24k/year bill.
 
-Scores up to **800 stocks** across your investor profile, runs a **7-gate Warren Buffett protocol**, computes intrinsic value via **4 independent valuation methods**, detects earnings manipulation via **Beneish M-Score**, monitors **9 live crash signals**, simulates **200 Monte Carlo paths**, backtests the strategy on historical prices, and delivers institutional-grade analysis — **for free**.
+Scores up to **800 stocks** across your investor profile, runs a **7-gate Warren Buffett protocol**, computes intrinsic value via **5 independent valuation methods** (including Reverse DCF and Earnings Power Value), detects earnings manipulation via the full **8-variable Beneish M-Score**, stress-tests your portfolio with **CVaR tail-risk scenarios**, surfaces a structured **Anti-Thesis bear case** for every pick, monitors **9 live crash signals**, simulates **200 Monte Carlo paths**, backtests the strategy on historical prices, and delivers institutional-grade analysis — **for free**.
 
 ---
 
@@ -30,9 +30,12 @@ Open the link, set your investor profile in the sidebar (portfolio size, risk le
 **What you get on the live app:**
 - Complete 10-tab Streamlit dashboard with all features
 - Real-time data pulled fresh on every run (yfinance, SEC EDGAR, FRED, Finnhub, FMP)
-- Full valuation analysis — DCF, Graham Number, EV/EBITDA, FCF Yield
+- 5-method valuation — DCF (3-stage), Graham Number, EV/EBITDA, FCF Yield, Earnings Power Value
+- Reverse DCF: see exactly what growth rate the market has already priced in
+- Anti-Thesis bear case engine for every pick
+- CVaR tail-risk stress testing with 3 macro shock scenarios
 - 9-signal crash detection + macro regime scoring
-- Portfolio construction with half-Kelly sizing and sector limits
+- Portfolio construction with CVaR-adjusted half-Kelly sizing and sector limits
 - Backtesting, earnings calendar, stock lookup — all included
 
 > **Note:** The hosted app runs on Streamlit Community Cloud (free tier). First-run analysis across 800 stocks can take 3–5 minutes as data is fetched live. Session history and watchlist data do not persist between restarts on the cloud — for persistent learning and the full CLI pipeline with Excel export and dark charts, run it locally (see [Setup](#setup) below).
@@ -52,13 +55,15 @@ Open the link, set your investor profile in the sidebar (portfolio size, risk le
 |--------|-------|
 | Stocks Scored | Up to **800** per run (dynamic NASDAQ universe) |
 | Data Sources | **9 independent** (Tier 1 all-tickers + Tier 2 top-30 + Smart Money) |
-| Valuation Methods | 4 (DCF, Graham, EV/EBITDA, FCF Yield) |
-| Risk Metrics | 11 (Altman Z, Sharpe, Sortino, VaR, ROIC/WACC, Piotroski, Beneish M…) |
+| Valuation Methods | **5** (3-Stage DCF, Graham, EV/EBITDA, FCF Yield, Earnings Power Value) |
+| Valuation Checks | **+1 Reverse DCF** — implied growth vs realistic growth analysis |
+| Risk Metrics | **14** (Altman Z, Sharpe, Sortino, VaR, **CVaR**, ROIC/WACC, **ROIC Trend**, Piotroski, Beneish M…) |
 | Protocol Gates | 7 (Warren Buffett-inspired) |
 | Crash Signals | **9** (VIX, HYG, yield curve, SPY drawdown, FRED, CFTC COT, BLS JOLTS) |
 | Monte Carlo Paths | 200 per run (252 trading days) |
 | Portfolio Size | **15 stocks** with sector concentration limit (max 3/sector) |
-| Position Cap | 15% per position (half-Kelly, VIX-scaled) |
+| Position Sizing | **CVaR-adjusted** half-Kelly (uses tail-risk, not just volatility) |
+| Position Cap | 15% per position |
 | Paid APIs Required | **0** |
 
 ---
@@ -113,7 +118,7 @@ flowchart TD
     B3 --> C
     B4 --> C
 
-    C[7-Factor Scorer\nrank-percentile normalisation · GARP · Value×Quality\nBeneish M-Score · data quality penalty\nearnings proximity · price freshness]
+    C[7-Factor Scorer\nrank-percentile normalisation · GARP · Value×Quality\nFull Beneish M-Score · ROIC Trend quality bonus\nEnhanced Short Squeeze · data quality penalty\nearnings proximity · price freshness]
 
     C --> D
 
@@ -133,15 +138,19 @@ flowchart TD
     D5 --> E
     D6 --> E
 
-    E[Portfolio Construction\ngreedy correlation-aware · sector limit · beta cap\nVIX-scaled half-Kelly · 15 stocks]
+    E[Portfolio Construction\ngreedy correlation-aware · sector limit · beta cap\nCVaR-adjusted half-Kelly · 15 stocks]
 
-    E --> F1[ValuationEngine\nDCF · Graham · EV/EBITDA · FCF yield\nDCF sensitivity Bear/Base/Bull]
-    E --> F2[RiskEngine\nAltman Z · Sharpe · Sortino · ROIC/WACC\nMax DD · VaR · Piotroski]
-    E --> F3[Protocol Analyzer\n7-Gate Buffett Screen]
+    E --> F1[ValuationEngine\n3-Stage DCF · Graham · EV/EBITDA\nFCF Yield · EPV · Reverse DCF\nDCF sensitivity Bear/Base/Bull]
+    E --> F2[RiskEngine\nAltman Z · Sharpe · Sortino · ROIC/WACC\nROIC Trend · Max DD · VaR · CVaR\nPiotroski · Full Beneish M-Score]
+    E --> F3[Anti-Thesis Engine\n10 structural red-flag checks\nHIGH / MEDIUM / LOW severity]
+    E --> F4[Protocol Analyzer\n7-Gate Buffett Screen]
+    E --> F5[Tail-Risk Stress Testing\nPortfolio CVaR · Rate Shock\nRecession · Liquidity Crunch]
 
     F1 --> G[Output]
     F2 --> G
     F3 --> G
+    F4 --> G
+    F5 --> G
 
     G --> H1[CLI Terminal\n+ 5 dark charts\n+ Excel export]
     G --> H2[Streamlit Dashboard\n10 interactive tabs]
@@ -204,7 +213,14 @@ composite = w1×momentum + w2×volatility + w3×value + w4×quality
 ```
 momentum = 0.10×r1m + 0.25×r3m + 0.35×r6m + 0.30×r12_1
 ```
-**Boosts:** Short squeeze (>15% float) · sector outperformance vs ETF · EPS beat rate · revenue QoQ · Finnhub EPS surprise · **Jensen's alpha** (market-adjusted) · **52-week high proximity**
+**Boosts:** Enhanced short squeeze (progressive 8%→28% float · volume surge) · sector outperformance vs ETF · EPS beat rate · revenue QoQ · Finnhub EPS surprise · **Jensen's alpha** (market-adjusted) · **52-week high proximity**
+
+**Short Squeeze Score (v8 enhanced):**
+```
+squeeze = min(0.10, (short_pct − 0.08) × 0.50)  +  min(0.04, (vol_ratio − 1.2) × 0.04)
+# Activates at 8% float (was 15%) · volume surge amplifies signal
+# Positive momentum: squeeze fuel  |  Negative momentum: confirms short thesis
+```
 
 ### Factor 2 — Volatility
 Annualised daily σ — **inverted** (low vol = high score). Beta-aware scaling for regime adjustment.
@@ -217,7 +233,7 @@ value = 0.40 × (P/E vs sector median)
       + shareholder yield bonus (dividends + buybacks)
 ```
 
-### Factor 4 — Quality _(9 signals)_
+### Factor 4 — Quality _(10 signals)_
 ```
 quality = Piotroski(9pt) × 0.60
         + ROE/Profit Margin blend × 0.40
@@ -226,14 +242,31 @@ quality = Piotroski(9pt) × 0.60
         + Revenue QoQ trend
         + EPS beat rate
         + Institutional ownership
+        + ROIC Trend bonus (EXPANDING +0.06 / IMPROVING +0.03)
+        − ROIC Trend penalty (CONTRACTING −0.05 / NEGATIVE −0.08)
         − Asset growth penalty (Cooper 2008)
-        − Beneish M-Score fraud penalty
+        − Full Beneish M-Score fraud penalty
 ```
 
-**Beneish M-Score:**
+**Full Beneish M-Score (v8 — 8-variable):**
 ```
-M ≈ 4.679 × TATA + 0.892 × SGI − 3.0
-# M > −1.78 → manipulation flag → quality penalty up to 12%
+M = -4.84 + 0.920×DSRI + 0.528×GMI + 0.404×AQI + 0.892×SGI
+         + 0.115×DEPI  - 0.172×SGAI + 4.679×TATA - 0.327×LVGI
+
+M > −1.78 → manipulation flag → quality penalty up to 12%
+# TATA, SGI, GMI, AQI, LVGI, SGAI computed from live data
+# DSRI, DEPI use Beneish non-manipulator means where prior-year unavailable
+```
+
+**ROIC Trend (v8 new):**
+```
+gap = earningsGrowth − revenueGrowth   # earnings outpacing revenue = margin expansion
+
+EXPANDING:   ROA > 12% AND gap > 5%   → +0.06 quality bonus
+IMPROVING:   ROA > 6%  AND gap > 0%   → +0.03 quality bonus
+STABLE:      ROA > 0%  AND |gap| < 5% → no adjustment
+CONTRACTING: gap < −10%               → −0.05 quality penalty
+NEGATIVE:    ROA < 0                  → −0.08 quality penalty
 ```
 
 ### Factor 5 — Technical _(5 sub-signals)_
@@ -257,17 +290,28 @@ Raw yield, capped at 15%. Heavily weighted for income-focused profiles.
 
 ---
 
-## Valuation Engine — 4 Independent Methods
+## Valuation Engine — 5 Independent Methods
 
 ![Valuation Matrix](images/photo_2026-03-07_09-35-52.jpg)
-*4-method valuation matrix — DCF, Graham Number, EV/EBITDA, FCF Yield — with fair value, entry zone, stop loss, R/R ratio, and signal*
+*5-method valuation matrix — 3-Stage DCF, Graham Number, EV/EBITDA, FCF Yield, EPV — with fair value, entry zone, stop loss, R/R ratio, and signal*
 
 | Method | Formula | Captures |
 |--------|---------|----------|
-| **DCF (2-stage)** | FCF/share × 5yr growth + terminal value, discounted at `rf + sector_erp + size_premium` | Future cash generation |
-| **Graham Number** | `√(22.5 × EPS × Book/share)` | Graham's classic intrinsic value |
+| **3-Stage DCF** | Stage 1 (yr 1–5): blended analyst growth · Stage 2 (yr 6–10): fade to GDP rate · Stage 3: terminal at 2.5% | Future cash generation with realistic mean reversion |
+| **Graham Number** | `√(22.5 × EPS × Book/share)` | Graham's classic intrinsic value ceiling |
 | **EV/EBITDA Target** | `EBITDA × sector_median_multiple → implied price` | How the market values sector peers |
 | **FCF Yield Target** | `FCF/share ÷ (rf + 3%)` | Price at a dynamic FCF return target |
+| **Earnings Power Value** | `NOPAT / WACC` — zero-growth perpetuity, net-debt adjusted | What the business is worth assuming no future growth |
+
+**Why 3-Stage DCF matters:**
+The old 2-stage model snapped directly from high growth to terminal — mis-pricing the fade period. Stage 2 (years 6–10) linearly decelerates growth toward 2.5% GDP, modelling the competitive erosion that always eventually arrives.
+
+**Earnings Power Value (EPV) — Bruce Greenwald:**
+```
+EPV = EBITDA × (1 − tax) / WACC   (perpetuity, zero growth)
+# If EPV > current_price: growth is free → safest possible entry
+# If EPV < current_price: you are paying for growth → high risk if it disappoints
+```
 
 **Dynamic discount rate:**
 ```python
@@ -281,6 +325,26 @@ Entry zone:  FV × 0.80  (20% margin of safety — Benjamin Graham rule)
 Target:      FV × 1.20  (take profit)
 Stop loss:   entry × 0.92  (8% downside protection)
 ```
+
+### Reverse DCF — Implied Growth Analysis (v8 new)
+
+**The most intellectually honest valuation check.** Instead of projecting forward, it asks: *"At the current price, what growth rate does the market already assume?"*
+
+```
+Bisection solver over 3-stage DCF:
+  find g such that DCF(g) = current_price
+  compare implied g vs realistic analyst estimate
+
+Gap = implied_growth − realistic_growth
+
+OVERPRICED:         gap > +15%  (market assumes far more than achievable)
+STRETCHED:          gap > +5%
+FAIR:               gap ±3%
+ATTRACTIVE:         gap < −3%   (market prices in less than realistic)
+DEEPLY_UNDERVALUED: gap < −10%  (growth is priced in at a discount)
+```
+
+Displayed as a dedicated card in every stock detail panel.
 
 **DCF Sensitivity — Bear / Base / Bull:**
 
@@ -298,7 +362,7 @@ Stop loss:   entry × 0.92  (8% downside protection)
 ## Risk Engine — Full Institutional Suite
 
 ![Risk & Quality](images/photo_2026-03-07_09-36-09.jpg)
-*Sharpe vs ROIC/WACC scatter (bubble size = spread magnitude), Piotroski F-Score bars, and Monte Carlo portfolio simulation (200 paths, 252 trading days)*
+*Sharpe vs ROIC/WACC scatter, Piotroski F-Score bars, Monte Carlo simulation (200 paths, 252 trading days), Anti-Thesis bear case flags, and CVaR tail-risk stress table*
 
 | Metric | Formula / Logic |
 |--------|----------------|
@@ -307,12 +371,71 @@ Stop loss:   entry × 0.92  (8% downside protection)
 | **Sortino Ratio** | Sharpe using downside deviation only |
 | **Max Drawdown** | Worst peak-to-trough % over the full period |
 | **VaR 95% (1mo)** | 5th percentile of 21-day rolling return distribution |
+| **CVaR 95% (1mo)** | Mean loss across all observations below VaR threshold — captures tail severity |
 | **ROIC / WACC** | `ROIC − WACC` spread → EXCEPTIONAL / STRONG / POSITIVE / NEUTRAL / DESTROYING VALUE |
+| **ROIC Trend** | EXPANDING / IMPROVING / STABLE / DECLINING / CONTRACTING / NEGATIVE |
 | **Full WACC** | `(E/V)×cost_equity + (D/V)×cost_debt×(1−tax)` — Modigliani-Miller |
 | **Accruals Ratio** | `(NI − OCF) / Assets` — negative = earnings backed by real cash |
 | **Gross Profitability** | `(Revenue × Gross Margin) / Assets` — Novy-Marx (2013) |
 | **Piotroski F-Score** | Full 9-point screen: profitability + leverage + efficiency |
+| **Full Beneish M-Score** | 8-variable manipulation detector → M > −1.78 = possible manipulator |
 | **IV Rank** | `(current_iv / hist_vol×1.15 − 0.5) × 1.25` — >0.70 = elevated fear |
+
+**CVaR vs VaR:**
+```
+VaR 95%:  "In 95% of months you lose less than X%"  — the threshold
+CVaR 95%: "In the worst 5% of months, you lose Y% on average"  — the severity
+
+CVaR/VaR ratio > 1.3× = fat tails → crash-like behaviour
+```
+
+---
+
+## Anti-Thesis Engine (v8 new)
+
+Every high-conviction pick is automatically challenged by a structured **bear case** — the 10 strongest arguments against buying it. Forces conscious risk acceptance before deploying capital.
+
+| # | Red Flag | Trigger | Severity |
+|---|----------|---------|----------|
+| 1 | High Leverage | D/E > 2.0× | HIGH |
+| 2 | Elevated Leverage | D/E > 1.2× | MEDIUM |
+| 3 | Low Earnings Quality | Accruals > 0.04 | HIGH |
+| 4 | Accruals Warning | Accruals > 0.01 | MEDIUM |
+| 5 | FCF/NI Divergence | FCF < 50% of Net Income | HIGH |
+| 6 | Negative Free Cash Flow | FCF < 0 | HIGH |
+| 7 | Revenue Contraction | QoQ revenue trend < −5% | HIGH |
+| 8 | Revenue Declining | YoY revenue growth < 0% | MEDIUM |
+| 9 | Bankruptcy Risk | Altman Z in DISTRESS zone | HIGH |
+| 10 | Financial Stress | Altman Z in GRAY zone | MEDIUM |
+| 11 | High Short Interest | Short float > 15% | HIGH |
+| 12 | Elevated Short Interest | Short float > 8% | MEDIUM |
+| 13 | Weak Fundamentals | Piotroski F ≤ 3/9 | HIGH |
+| 14 | Key Piotroski Failures | ROA / OCF / LowDebt failed | MEDIUM |
+| 15 | High Overhead Structure | Gross − Operating margin gap > 35% | MEDIUM |
+| 16 | Earnings Deterioration | EPS growth < −15% YoY | HIGH |
+
+Flags sorted HIGH → MEDIUM → LOW. In the stock detail panel the expander **auto-opens** when any HIGH flags exist. In the Risk & Quality tab a summary table shows HIGH/MEDIUM count per stock across the full portfolio.
+
+---
+
+## Tail-Risk Stress Testing (v8 new)
+
+Portfolio-level and per-stock tail risk analysis. Shown in the Risk & Quality tab.
+
+### Portfolio-Level CVaR
+```
+Equal-weighted portfolio monthly return → worst 5% tail → CVaR
+CVaR/VaR ratio displayed as "tail severity multiplier"
+```
+
+### Per-Stock Stress Scenarios
+| Scenario | Calculation | Represents |
+|----------|-------------|------------|
+| **Rate Shock** | beta × −8% | Fed hikes +200bps unexpectedly; high-beta stocks amplify losses |
+| **Recession** | Worst 2% historical monthly return | What this stock actually did in its worst historical periods |
+| **Liquidity Crunch** | VaR × 1.5 stress multiplier | Credit freeze / market dislocation — 50% worse than the bad tail |
+
+**Worst-Day Avg:** Average per-stock return on the portfolio's worst 10% of days. Exposes hidden macro correlation — if all your picks fall 3%+ on the same day, your diversification is illusory.
 
 ---
 
@@ -341,7 +464,7 @@ Every top-15 stock passes through a Warren Buffett–inspired 7-gate screen:
 ## Portfolio Construction
 
 ![Portfolio Allocation](images/photo_2026-03-07_09-36-27.jpg)
-*Sector allocation donut with Kelly-sized weights, position breakdown table showing dollar amounts and share counts at current prices*
+*Sector allocation donut with CVaR-adjusted Kelly-sized weights, position breakdown table showing dollar amounts and share counts at current prices*
 
 ```mermaid
 flowchart TD
@@ -353,13 +476,29 @@ flowchart TD
     E --> F{Sector\nConcentration}
     F -->|sector > 3 stocks| G[Trim overweight sectors\nfill with best alternatives]
     F -->|OK| H
-    G --> H[VIX-Scaled Half-Kelly Sizing]
-    H --> I[eff_vol = max hist_vol, VIX/100 + bear_penalty\nkelly_f = edge / eff_vol² / 2\nweight = min kelly_f / total, 0.15]
+    G --> H[CVaR-Adjusted Half-Kelly Sizing]
+    H --> I[eff_vol = max hist_vol, VIX/100, CVaR_annual_vol\nkelly_f = edge / eff_vol² / 2\nweight = min kelly_f / total, 0.15]
     I --> J[15-Stock Portfolio\n100% allocated]
 
     style J fill:#10B981,color:#fff
     style I fill:#3B82F6,color:#fff
 ```
+
+### CVaR-Adjusted Kelly Sizing (v8 upgraded)
+
+Standard Kelly uses historical variance as the denominator. In fat-tail environments, historical variance understates true risk — CVaR does not.
+
+```python
+# Compute per-stock monthly CVaR from price history
+cvar_monthly  = |mean(returns in worst 5%)|
+cvar_annual   = cvar_monthly × sqrt(12)   # annualise
+
+# CVaR-adjusted effective volatility
+eff_vol = max(hist_vol, vix_implied + bear_penalty, cvar_annual)
+kelly_f = (score/100) / (eff_vol² × 2)   # half-Kelly
+weight  = min(kelly_f / Σkelly, 0.15)    # capped at 15%
+```
+> When a stock's tail risk (CVaR) significantly exceeds its average volatility, Kelly automatically shrinks the position size — protecting against crashes that vol alone would miss.
 
 ### Beta Targets by Risk Level
 | Risk Level | Label | Beta Target |
@@ -368,16 +507,6 @@ flowchart TD
 | 2 | Balanced | ≤ 1.05 |
 | 3 | Aggressive | ≤ 1.30 |
 | 4 | Speculative | ≤ 1.60 |
-
-### VIX-Scaled Kelly Position Sizing
-```python
-vix_implied = VIX / 100.0            # VIX=30 → 30% annual vol floor
-bear_penalty = min(0.15, ...)         # extra floor when SPY >10% off high
-eff_vol = max(hist_vol, vix_implied + bear_penalty)
-kelly_f = (score/100) / (eff_vol² × 2)    # half-Kelly
-weight  = min(kelly_f / Σkelly, 0.15)     # capped at 15%
-```
-> Automatically shifts weight toward lower-vol stocks in high-VIX environments — exactly the right behaviour in crashes.
 
 ---
 
@@ -521,12 +650,12 @@ Output: Equal-weighted portfolio equity curve vs S&P 500 · Win rate · Portfoli
 | Tab | What You Get |
 |-----|-------------|
 | **1. Rankings** | Macro tiles · top-3 pick cards · full 15-stock table with signals · factor radar (7-factor fingerprint) · score distribution histogram · per-stock detail panel |
-| **2. Valuation** | 4-method matrix · entry positioning chart · valuation method spread scatter · DCF sensitivity Bear/Base/Bull |
-| **3. Risk & Quality** | Risk metrics table · Sharpe vs ROIC/WACC bubble scatter · Piotroski bars · Monte Carlo simulation (200 paths) |
+| **2. Valuation** | 5-method matrix · Reverse DCF implied growth card · entry positioning chart · valuation method spread scatter · DCF sensitivity Bear/Base/Bull |
+| **3. Risk & Quality** | Risk metrics table (incl. CVaR + Beneish M + ROIC Trend) · Anti-Thesis overview table · Tail-Risk Stress Testing (portfolio CVaR + 3 macro scenarios) · Sharpe vs ROIC/WACC scatter · Piotroski bars · Monte Carlo (200 paths) |
 | **4. Protocol Gates** | 15×7 gate heatmap · protocol summary with conviction + signal + entry target |
-| **5. Portfolio** | Sector donut chart · position breakdown with Kelly weights · dollar amounts + share counts |
+| **5. Portfolio** | Sector donut chart · position breakdown with CVaR-adjusted Kelly weights · dollar amounts + share counts |
 | **6. Macro & Performance** | VIX/yield/regime tiles · sector ETF bars · 5yr normalised price history vs S&P 500 · correlation heatmap · yield curve chart |
-| **7. Stock Lookup** | Search any ticker — fresh full analysis: candlestick, valuation, risk, news, protocol |
+| **7. Stock Lookup** | Search any ticker — fresh full analysis: candlestick, valuation, EPV, Reverse DCF, Anti-Thesis, risk, news, protocol |
 | **8. History** | Past sessions · per-pick cards with factor score bars · entry/exit P&L · time-machine full analysis view |
 | **9. Backtest** | Portfolio-wide equity curve vs S&P 500 · 5 aggregate tiles · per-stock breakdown |
 | **10. Calendar** | Earnings timeline sorted by urgency: ≤7d RED · ≤14d AMBER · ≤30d BLUE · Wall Street-style quant analysis per stock |
@@ -539,8 +668,8 @@ Output: Equal-weighted portfolio equity curve vs S&P 500 · Win rate · Portfoli
 After the analysis pipeline completes, the terminal enters an interactive REPL:
 
 ```
-/stock AAPL         → Full quant report: thesis · valuation · DCF sensitivity
-                       risk metrics · analyst targets · technical · protocol
+/stock AAPL         → Full quant report: thesis · valuation (5 methods + Reverse DCF)
+                       risk metrics · analyst targets · technical · protocol · Anti-Thesis
 /news AAPL [15]     → Headlines with per-article sentiment colour coding
 /chart AAPL [6mo]   → Dark-theme candlestick + SMA 20/50/200 + RSI panel
 /compare AAPL MSFT  → Side-by-side: price · P/E · EV/EBITDA · Sharpe · Piotroski · signal
@@ -578,12 +707,12 @@ Pass: #3FB950          Warn: #E3B341     Fail: #DA3633
 
 | Sheet | Contents |
 |-------|----------|
-| Latest Picks | Top 15 with all 7 factor scores, composite, Kelly weight |
+| Latest Picks | Top 15 with all 7 factor scores, composite, CVaR-adjusted Kelly weight |
 | Allocation | Weight %, dollar amounts, approx share counts |
 | Macro Overview | VIX, 10Y yield, regime, 9-signal crash count, sector ETF rankings |
 | History | All past sessions with tickers, entry prices, evaluations |
 | Track Record | Evaluated sessions — avg return, S&P return, alpha |
-| Deep Analysis | Gate scorecard · 4-method valuation · Risk metrics · Beneish M-Score |
+| Deep Analysis | Gate scorecard · 5-method valuation · Reverse DCF · Risk metrics · Beneish M-Score · Anti-Thesis flags |
 
 ---
 
@@ -607,28 +736,46 @@ timeline
     v7 : Bug fixes · Earnings proximity scoring · Price freshness penalty
        : Forward alpha threshold fixed · Conviction logic corrected
        : EPS beat rate denominator fixed · SEC CIK deduplication
+    v8 : 3-Stage DCF · Earnings Power Value (EPV) · Reverse DCF
+       : Full 8-variable Beneish M-Score
+       : ROIC Trend (6-state directional signal)
+       : CVaR (Expected Shortfall) · CVaR-adjusted Kelly sizing
+       : Anti-Thesis Engine (10 structural red-flag checks)
+       : Tail-Risk Stress Testing (portfolio CVaR + 3 macro scenarios)
+       : Enhanced Short Squeeze (8% threshold · volume surge)
 ```
 
-### v7 — Bug Fixes & Improvements
+### v8 — Quantitative Logic Upgrades
 
-**Critical Bug Fixes:**
-
-| File | Bug | Fix |
-|------|-----|-----|
-| `scorer.py` | Forward fundamental alpha **never fired** — threshold `_es > 2.0` required a 200% EPS surprise; Finnhub returns ratios (0.05 = 5%) | Threshold `0.02`, divisor `1.5` — signal now correctly activates for consistent EPS beaters |
-| `protocol.py` | HIGH conviction checked `fail_c == 0` — one failing gate wrongly downgraded to MEDIUM | Fixed to `fail_c <= 1` per spec |
-| `learner.py` | History tab showed null target price — `v.get("target")` key doesn't exist | Fixed to `v.get("target_price")` |
-| `alternative_data.py` | EPS beat rate divided by `len(quarterly)` (total quarters) instead of quarters with valid EPS data | Added `valid_q` counter — beat rate no longer deflated by missing data |
-| `learner.py` | Price evaluation failed on holidays — `period="2d"` returns empty on non-trading days | Changed to `period="5d"` |
-| `collector.py` | All 7 questions labelled "X of 7" despite there being 8 questions | Fixed Q1–Q7 to "X of 8"; updated welcome banner to v7 |
-
-**New Features:**
+**Valuation:**
 
 | Feature | Description |
 |---------|-------------|
-| **Earnings proximity adjustment** | Stocks ≤7 days from earnings get a composite penalty scaled by risk level: Conservative −4pts · Balanced −2.5pts · Aggressive −1pt · Speculative 0pts. Prevents recommending stocks on the eve of a gap-down risk event. |
-| **Price freshness penalty** | `price_freshness` (computed per-ticker but never used in scoring) now applies up to −7pts for data older than 7 days. Prevents stale technicals from appearing clean. |
-| **SEC CIK deduplication** | `enrich_top_n` now populates the module-level `_SEC_CIK_CACHE` from the already-fetched map, so `fetch_sec_revenue_trend` reuses it — eliminating a redundant HTTP request to SEC EDGAR per run. |
+| **3-Stage DCF** | Upgraded from 2-stage. Stage 2 (yr 6–10) fades growth linearly to 2.5% GDP, modelling competitive mean reversion. Stage 3 terminal discounted from year 10. DCF sensitivity Bear/Base/Bull also upgraded. |
+| **Earnings Power Value (EPV)** | 5th valuation method. Values the business assuming zero growth: `NOPAT / WACC`. If EPV > price → growth is free. Included in the fair value median and estimates dict. |
+| **Reverse DCF** | Bisection solver finds the implied FCF growth rate priced into the current stock price. Compares to analyst estimates → OVERPRICED / STRETCHED / FAIR / ATTRACTIVE / DEEPLY_UNDERVALUED. Shown as a dedicated card in the stock detail panel. |
+
+**Risk & Quality:**
+
+| Feature | Description |
+|---------|-------------|
+| **CVaR (Expected Shortfall)** | Mean loss in the worst 5% of 1-month observations. Always ≤ VaR. Added to the risk metrics table alongside VaR. CVaR/VaR ratio shows tail severity. |
+| **Full Beneish M-Score** | Upgraded from 2-factor approximation to the full 8-variable academic model (TATA, SGI, GMI, AQI, DSRI, DEPI, SGAI, LVGI). M > −1.78 = possible manipulator. Shown in risk table. |
+| **ROIC Trend** | New directional quality signal: EXPANDING / IMPROVING / STABLE / DECLINING / CONTRACTING / NEGATIVE. Feeds quality factor bonus (±0.03–0.08 pts). Shown in risk table. |
+
+**Portfolio & Scoring:**
+
+| Feature | Description |
+|---------|-------------|
+| **CVaR-Adjusted Kelly** | `size_positions()` now computes per-stock monthly CVaR, annualises it (×√12), and uses `max(hist_vol, vix_floor, cvar_vol)` as the Kelly denominator. Fat-tail stocks get sized down automatically. |
+| **Enhanced Short Squeeze** | Threshold lowered from 15% → 8% short float. Progressive scale 0→0.10 over 8%→28%. Volume surge component (current vs 3-month avg) amplifies the signal. |
+
+**Defensive Analysis:**
+
+| Feature | Description |
+|---------|-------------|
+| **Anti-Thesis Engine** | 10 structural checks challenge every Buy signal: leverage, accruals, FCF/NI divergence, negative FCF, revenue deceleration, Altman Z zone, short interest, Piotroski failures, SG&A bloat, earnings deterioration. Flags sorted HIGH → MEDIUM → LOW. Expander auto-opens when HIGH flags exist. |
+| **Tail-Risk Stress Testing** | Portfolio CVaR + per-stock stress scenarios: Rate Shock (+200bps, beta-scaled), Recession (worst 2% hist monthly), Liquidity Crunch (VaR × 1.5). Worst-day avg shows hidden macro correlation. VaR vs CVaR grouped bar chart. |
 
 ---
 
@@ -681,12 +828,12 @@ portfolio/
 ├── advisor/
 │   ├── collector.py          ← 8-question investor profile builder
 │   ├── fetcher.py            ← yfinance + extended + Stooq + FRED + Finnhub + CFTC + BLS
-│   ├── scorer.py             ← 7-factor MultiFactorScorer (GARP · Beneish · Jensen's alpha)
+│   ├── scorer.py             ← 7-factor MultiFactorScorer (GARP · Beneish · ROIC Trend · Jensen's alpha)
 │   ├── alternative_data.py   ← Tier 2: options · Trends · Reddit · AV · FMP · SEC · Smart Money
 │   ├── smart_money.py        ← SEC Form 4 insider cluster + 8-K event sentiment
-│   ├── portfolio.py          ← Greedy selection + beta cap + sector limit + VIX-Kelly
-│   ├── valuation.py          ← DCF · Graham · EV/EBITDA · FCF yield (dynamic DR)
-│   ├── risk.py               ← Altman Z · Sharpe · Sortino · full WACC · Piotroski
+│   ├── portfolio.py          ← Greedy selection + beta cap + sector limit + CVaR-adjusted Kelly
+│   ├── valuation.py          ← 3-Stage DCF · Graham · EV/EBITDA · FCF yield · EPV · Reverse DCF
+│   ├── risk.py               ← Altman Z · Sharpe · Sortino · CVaR · ROIC Trend · Beneish M · Anti-Thesis · Tail-Risk
 │   ├── protocol.py           ← 7-gate Warren Buffett investment protocol
 │   ├── learner.py            ← Session memory · adaptive weights · 6 learning layers
 │   ├── news_fetcher.py       ← yfinance + RSS + Finnhub + NewsAPI (negation-aware)

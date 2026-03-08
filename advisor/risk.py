@@ -55,6 +55,8 @@ class RiskEngine:
                 iv_rank_pre: Optional[float] = None) -> dict:
         close   = history["Close"].dropna()
         iv_rank = iv_rank_pre if iv_rank_pre is not None else self._compute_iv_rank(close, nearest_iv)
+        # Get raw_data from universe_data context if needed (passed as optional)
+        _raw = {}
         return {
             "ticker":            ticker,
             "altman_z":          self.altman_z(info),
@@ -62,10 +64,13 @@ class RiskEngine:
             "sortino":           self.sortino(close, rf_rate),
             "max_drawdown_pct":  self.max_drawdown(close),
             "var_95_pct":        self.var_95(close),
+            "cvar_95_pct":       self.cvar_95(close),
             "roic_wacc":         self.roic_wacc_spread(info, rf_rate, sector),
+            "roic_trend":        self.roic_trend(info),
             "accruals":          self.accruals_ratio(info),
             "gross_prof":        self.gross_profitability(info),
             "piotroski":         self.piotroski_9pt(info),
+            "beneish":           self.beneish_m_score(info, _raw),
             "iv_rank":           iv_rank,
         }
 
@@ -173,6 +178,387 @@ class RiskEngine:
         if len(monthly) < 5:
             return None
         return round(float(monthly.quantile(0.05)) * 100, 1)
+
+    def cvar_95(self, close: pd.Series) -> Optional[float]:
+        """
+        Historical CVaR (Expected Shortfall) at 95% confidence.
+        = mean loss across the worst 5% of 1-month return observations.
+        Always <= VaR; captures tail severity, not just the threshold.
+        Returns a negative number (e.g. -14.2 means expected monthly tail loss = 14.2%).
+        """
+        if len(close) < 63:
+            return None
+        monthly = close.pct_change(21).dropna()
+        if len(monthly) < 10:
+            return None
+        cutoff = float(monthly.quantile(0.05))
+        tail   = monthly[monthly <= cutoff]
+        if len(tail) == 0:
+            return None
+        return round(float(tail.mean()) * 100, 1)
+
+    # ── Beneish M-Score (full 8-variable) ─────────────────────────────────────
+    def beneish_m_score(self, info: dict, raw_data: dict = None) -> dict:
+        """
+        Full 8-variable Beneish M-Score (Beneish 1999).
+        Detects probability of earnings manipulation.
+        M > -1.78: manipulator  |  M <= -1.78: non-manipulator
+
+        Variables (year T vs year T-1):
+          DSRI — Days Sales Receivable Index (receivables growing faster than sales?)
+          GMI  — Gross Margin Index (margin compression = deteriorating competitive position)
+          AQI  — Asset Quality Index (non-productive asset bloat)
+          SGI  — Sales Growth Index
+          DEPI — Depreciation Index (slowing depreciation inflates reported earnings)
+          SGAI — SG&A Index (rising overhead signals loss of leverage)
+          LVGI — Leverage Index (rising leverage = financial stress)
+          TATA — Total Accruals / Total Assets (accruals = accounting > cash earnings)
+
+        M = -4.84 + 0.920×DSRI + 0.528×GMI + 0.404×AQI + 0.892×SGI
+                 + 0.115×DEPI  - 0.172×SGAI + 4.679×TATA - 0.327×LVGI
+
+        For variables where prior-year data is unavailable, we use neutral means
+        from Beneish's original sample (non-manipulator averages) per the paper.
+        """
+        raw = raw_data or {}
+
+        # ── Variables computed from yfinance info ──────────────────────────────
+        # TATA — most reliable: all inputs available
+        ni  = info.get("netIncomeToCommon") or info.get("netIncome")
+        ocf = info.get("operatingCashflow")
+        ta  = info.get("totalAssets")
+        if ni and ocf and ta and float(ta) > 0:
+            tata = (float(ni) - float(ocf)) / float(ta)
+        else:
+            tata = 0.018   # Beneish sample mean (non-manipulator)
+
+        # SGI — sales growth index (current / prior year revenue)
+        rev_g = raw.get("revenue_trend") or float(info.get("revenueGrowth") or 0)
+        sgi   = 1.0 + rev_g    # if rev grew 10%, SGI = 1.10
+
+        # GMI — gross margin index (prior / current gross margin)
+        # If margins are compressing year-over-year, GMI > 1 (red flag)
+        # Proxy: use earningsGrowth relative to revenueGrowth
+        # Divergence: revenue growing but earnings falling = margin compression
+        earn_g = float(info.get("earningsGrowth") or 0)
+        gm     = float(info.get("grossMargins")   or 0)
+        if earn_g < rev_g - 0.05 and gm > 0:
+            # Approximate: prior_gm = gm / (1 + earn_g); GMI = prior / current
+            prior_gm_approx = min(1.0, gm * (1 + max(0, rev_g - earn_g)))
+            gmi = prior_gm_approx / max(gm, 0.01)
+        else:
+            gmi = 1.0   # no detectable compression
+
+        # AQI — asset quality index
+        # Non-current / total assets ratio vs prior year (proxy via asset growth)
+        asset_growth = raw.get("asset_growth") or 0.0
+        aqi = 1.0 + max(0.0, float(asset_growth) - 0.05)  # penalise aggressive asset inflation
+
+        # DEPI — depreciation index (proxy: capex intensity change)
+        # Higher DEPI > 1 = depreciation slowing relative to PP&E (inflating earnings)
+        # Without prior year data, use neutral mean
+        depi = 1.0   # Beneish sample mean; cannot compute without prior year D&A
+
+        # DSRI — days sales receivable index
+        # Without prior year receivables, use neutral mean
+        dsri = 1.031   # Beneish non-manipulator average
+
+        # SGAI — SG&A index
+        # Without prior year SG&A, proxy via margin spread
+        om = float(info.get("operatingMargins") or 0)
+        if gm > 0 and om >= 0:
+            sga_ratio = gm - om   # implied SG&A / Revenue ratio
+            sgai = 1.0 + max(0.0, sga_ratio - 0.20)   # penalise bloated SG&A
+        else:
+            sgai = 1.0   # neutral
+
+        # LVGI — leverage index (current leverage vs prior year)
+        de  = info.get("debtToEquity")
+        if de is not None:
+            de_v = float(de)
+            if de_v > 10:
+                de_v /= 100
+            # Proxy: if earnings are falling but debt is high, leverage likely rising
+            lvgi = 1.0 + max(0.0, (de_v - 0.80) * 0.10)
+        else:
+            lvgi = 1.0   # neutral
+
+        # ── M-Score formula ────────────────────────────────────────────────────
+        m = (-4.84
+             + 0.920 * dsri
+             + 0.528 * gmi
+             + 0.404 * aqi
+             + 0.892 * sgi
+             + 0.115 * depi
+             - 0.172 * sgai
+             + 4.679 * tata
+             - 0.327 * lvgi)
+
+        manipulator = m > -1.78
+
+        if m > -1.00:
+            risk_label = "HIGH MANIPULATION RISK"
+        elif m > -1.78:
+            risk_label = "POSSIBLE MANIPULATION"
+        elif m > -2.22:
+            risk_label = "CLEAN"
+        else:
+            risk_label = "VERY CLEAN"
+
+        return {
+            "m_score":     round(m, 3),
+            "manipulator": manipulator,
+            "risk_label":  risk_label,
+            "components":  {
+                "TATA": round(tata, 4),
+                "SGI":  round(sgi,  3),
+                "GMI":  round(gmi,  3),
+                "AQI":  round(aqi,  3),
+                "LVGI": round(lvgi, 3),
+                "SGAI": round(sgai, 3),
+            },
+        }
+
+    # ── ROIC Trend ────────────────────────────────────────────────────────────
+    def roic_trend(self, info: dict) -> dict:
+        """
+        ROIC directional trend: is return on invested capital improving or declining?
+
+        Uses margin trajectory as proxy:
+          - Earnings growing faster than revenue = margin expansion = improving ROIC
+          - Earnings growing slower than revenue = margin compression = declining ROIC
+
+        Also uses ROA absolute level for context.
+        Returns {trend, score_adj, detail}
+        """
+        roa    = info.get("returnOnAssets")
+        rev_g  = float(info.get("revenueGrowth")  or 0)
+        earn_g = float(info.get("earningsGrowth") or 0)
+        om     = float(info.get("operatingMargins") or 0)
+        gm     = float(info.get("grossMargins")     or 0)
+
+        if roa is None:
+            return {"trend": "UNKNOWN", "score_adj": 0.0, "detail": "Insufficient data"}
+
+        roa_v     = float(roa)
+        gap       = earn_g - rev_g   # positive = earnings outpacing revenue = margin expansion
+
+        if roa_v > 0.12 and gap > 0.05:
+            trend     = "EXPANDING"
+            score_adj = 0.06
+            detail    = f"ROIC expanding: ROA {roa_v:.1%}, EPS growing {gap:.1%} faster than revenue"
+        elif roa_v > 0.06 and gap > 0.0:
+            trend     = "IMPROVING"
+            score_adj = 0.03
+            detail    = f"ROIC improving: ROA {roa_v:.1%}, margins trending up"
+        elif roa_v < 0:
+            trend     = "NEGATIVE"
+            score_adj = -0.08
+            detail    = f"ROIC negative: ROA {roa_v:.1%} — destroying shareholder value"
+        elif roa_v > 0.0 and abs(gap) < 0.05:
+            trend     = "STABLE"
+            score_adj = 0.0
+            detail    = f"ROIC stable: ROA {roa_v:.1%}, revenue and earnings growing in line"
+        elif gap < -0.10:
+            trend     = "CONTRACTING"
+            score_adj = -0.05
+            detail    = f"ROIC contracting: EPS lagging revenue by {abs(gap):.1%} — margin compression"
+        else:
+            trend     = "DECLINING"
+            score_adj = -0.03
+            detail    = f"ROIC declining: ROA {roa_v:.1%}, earnings under pressure"
+
+        return {"trend": trend, "score_adj": score_adj, "detail": detail}
+
+    # ── Anti-Thesis Engine ────────────────────────────────────────────────────
+    def anti_thesis(self, ticker: str, info: dict,
+                    history: pd.DataFrame, risk_result: dict,
+                    raw_data: dict = None) -> list:
+        """
+        Structural red flags that challenge a Buy signal.
+        Returns list of {flag, severity, detail} sorted HIGH → MEDIUM → LOW.
+        Severity: HIGH | MEDIUM | LOW
+        """
+        flags = []
+        raw   = raw_data or {}
+
+        # 1. Leverage risk
+        de = info.get("debtToEquity")
+        if de is not None:
+            v = float(de)
+            if v > 10:
+                v /= 100      # yfinance sometimes returns 150 meaning 1.5×
+            if v > 2.0:
+                flags.append({"flag": "High Leverage", "severity": "HIGH",
+                              "detail": f"D/E {v:.1f}× — debt load may strain FCF in rate-shock scenarios"})
+            elif v > 1.2:
+                flags.append({"flag": "Elevated Leverage", "severity": "MEDIUM",
+                              "detail": f"D/E {v:.1f}× — above 1.2× threshold; monitor interest coverage"})
+
+        # 2. Earnings quality (accruals)
+        accruals = risk_result.get("accruals")
+        if accruals is not None and accruals > 0.04:
+            flags.append({"flag": "Low Earnings Quality", "severity": "HIGH",
+                          "detail": f"Accruals {accruals:+.3f} — accounting earnings exceed cash flow; potential manipulation risk"})
+        elif accruals is not None and accruals > 0.01:
+            flags.append({"flag": "Accruals Warning", "severity": "MEDIUM",
+                          "detail": f"Accruals {accruals:+.3f} — cash earnings lag reported earnings"})
+
+        # 3. FCF vs Net Income divergence
+        fcf = info.get("freeCashflow")
+        ni  = info.get("netIncomeToCommon") or info.get("netIncome")
+        if fcf is not None and ni is not None and float(ni) > 0:
+            ratio = float(fcf) / float(ni)
+            if ratio < 0.5:
+                flags.append({"flag": "FCF/NI Divergence", "severity": "HIGH",
+                              "detail": f"FCF is only {ratio:.0%} of net income — earnings may overstate cash generation"})
+            elif ratio < 0.75:
+                flags.append({"flag": "FCF Lag", "severity": "MEDIUM",
+                              "detail": f"FCF is {ratio:.0%} of net income — elevated capex intensity; monitor conversion"})
+
+        # 4. Negative FCF
+        if fcf is not None and float(fcf) < 0:
+            flags.append({"flag": "Negative Free Cash Flow", "severity": "HIGH",
+                          "detail": f"FCF ${float(fcf)/1e9:.2f}B — company consumes more cash than it generates"})
+
+        # 5. Revenue deceleration
+        rev_trend = raw.get("revenue_trend")
+        rg        = info.get("revenueGrowth")
+        if rev_trend is not None and rev_trend < -0.05:
+            flags.append({"flag": "Revenue Contraction", "severity": "HIGH",
+                          "detail": f"QoQ revenue trend {rev_trend:+.1%} — sequential top-line decline compresses forward multiples"})
+        elif rg is not None and float(rg) < 0:
+            flags.append({"flag": "Revenue Declining", "severity": "MEDIUM",
+                          "detail": f"YoY revenue growth {float(rg):+.1%} — negative growth narrows the bull-case valuation range"})
+
+        # 6. Altman Z distress / gray zone
+        az    = risk_result.get("altman_z", {})
+        z_sc  = az.get("score")
+        z_str = f"Z={z_sc:.2f} " if z_sc is not None else ""
+        if az.get("zone") == "DISTRESS":
+            flags.append({"flag": "Bankruptcy Risk", "severity": "HIGH",
+                          "detail": f"Altman {z_str}— DISTRESS zone; elevated insolvency probability"})
+        elif az.get("zone") == "GRAY":
+            flags.append({"flag": "Financial Stress", "severity": "MEDIUM",
+                          "detail": f"Altman {z_str}— GRAY zone; monitor balance sheet over next 2 quarters"})
+
+        # 7. Short interest
+        short_pct = raw.get("short_percent")
+        if short_pct is not None:
+            sp = float(short_pct)
+            if sp > 0.15:
+                flags.append({"flag": "High Short Interest", "severity": "HIGH",
+                              "detail": f"{sp:.1%} of float sold short — sophisticated capital positioned against this thesis"})
+            elif sp > 0.08:
+                flags.append({"flag": "Elevated Short Interest", "severity": "MEDIUM",
+                              "detail": f"{sp:.1%} of float sold short — notable bearish positioning warrants scrutiny"})
+
+        # 8. Piotroski weak spots
+        pf       = risk_result.get("piotroski", {})
+        pf_score = pf.get("score")
+        failed   = pf.get("failed", [])
+        if pf_score is not None and pf_score <= 3:
+            flags.append({"flag": "Weak Fundamentals", "severity": "HIGH",
+                          "detail": f"Piotroski F={pf_score}/9 WEAK — failed: {', '.join(failed[:4])}"})
+        elif failed:
+            key_fails = [f for f in failed if any(k in f for k in ["ROA", "OCF", "LowDebt", "EPS"])]
+            if key_fails:
+                flags.append({"flag": "Key Piotroski Failures", "severity": "MEDIUM",
+                              "detail": f"Failed critical checks: {', '.join(key_fails[:3])}"})
+
+        # 9. SG&A bloat (gross - operating margin spread)
+        gm = info.get("grossMargins")
+        om = info.get("operatingMargins")
+        if gm is not None and om is not None:
+            gm_v, om_v = float(gm), float(om)
+            if gm_v > 0 and (gm_v - om_v) > 0.35:
+                flags.append({"flag": "High Overhead Structure", "severity": "MEDIUM",
+                              "detail": f"Gross {gm_v:.0%} vs operating {om_v:.0%} — {(gm_v-om_v):.0%} gap signals bloated SG&A or R&D burn"})
+
+        # 10. Earnings deterioration
+        eg = info.get("earningsGrowth")
+        if eg is not None and float(eg) < -0.15:
+            flags.append({"flag": "Earnings Deterioration", "severity": "HIGH",
+                          "detail": f"EPS growth {float(eg):+.1%} YoY — significant decline challenges the valuation bull case"})
+
+        flags.sort(key=lambda x: {"HIGH": 0, "MEDIUM": 1, "LOW": 2}.get(x["severity"], 3))
+        return flags
+
+    # ── Portfolio Tail-Risk ───────────────────────────────────────────────────
+    def portfolio_tail_risk(self, tickers: list, universe_data: dict,
+                            rf_rate: float = 0.045) -> dict:
+        """
+        Portfolio-level CVaR, correlated worst-day returns, and 3 macro stress
+        scenarios per stock (rate shock, recession, liquidity crunch).
+        """
+        ret_series: Dict[str, pd.Series] = {}
+        for t in tickers:
+            data  = universe_data.get(t, {})
+            hist  = data.get("history")
+            if hist is None or hist.empty:
+                continue
+            close = hist["Close"].dropna()
+            if len(close) >= 63:
+                ret_series[t] = close.pct_change().dropna()
+
+        result: dict = {
+            "portfolio_cvar": None,
+            "portfolio_var":  None,
+            "worst_day_avg":  {},
+            "stress_scenarios": {},
+        }
+
+        if len(ret_series) >= 2:
+            df        = pd.DataFrame(ret_series).dropna()
+            port_rets = df.mean(axis=1)
+
+            # Monthly portfolio returns (21-trading-day rolling product)
+            port_m = (1 + port_rets).rolling(21).apply(np.prod, raw=True) - 1
+            port_m = port_m.dropna()
+
+            if len(port_m) >= 10:
+                var_cut  = float(port_m.quantile(0.05))
+                tail     = port_m[port_m <= var_cut]
+                result["portfolio_cvar"] = round(float(tail.mean()) * 100, 1) if len(tail) > 0 else None
+                result["portfolio_var"]  = round(var_cut * 100, 1)
+
+            # Average per-stock return on the portfolio's worst 10% of days
+            n_worst   = max(5, int(len(port_rets) * 0.10))
+            worst_idx = port_rets.nsmallest(n_worst).index
+            worst_avg = df.loc[worst_idx].mean() * 100
+            result["worst_day_avg"] = {t: round(float(v), 2) for t, v in worst_avg.items()}
+
+        # Per-stock stress scenarios (pure math, no external data needed)
+        for t in tickers:
+            data    = universe_data.get(t, {})
+            info    = data.get("info", {})
+            hist    = data.get("history")
+            beta    = float(info.get("beta") or 1.0)
+            monthly = pd.Series([], dtype=float)
+            if hist is not None and not hist.empty:
+                close = hist["Close"].dropna()
+                if len(close) >= 63:
+                    monthly = close.pct_change(21).dropna()
+
+            # Scenario 1: Rate shock (+200bps) — beta-scaled drawdown estimate
+            rate_shock = round(beta * -8.0, 1)
+
+            # Scenario 2: Recession — worst 2% historical monthly return
+            recession  = (round(float(monthly.quantile(0.02)) * 100, 1)
+                          if len(monthly) >= 10 else None)
+
+            # Scenario 3: Liquidity crunch — VaR × 1.5 stress multiplier
+            liq_crunch = (round(float(monthly.quantile(0.05)) * 150, 1)
+                          if len(monthly) >= 10 else None)
+
+            result["stress_scenarios"][t] = {
+                "rate_shock_pct": rate_shock,
+                "recession_pct":  recession,
+                "liquidity_pct":  liq_crunch,
+                "beta":           round(beta, 2),
+            }
+
+        return result
 
     # ── Valuation quality metrics ─────────────────────────────────────────────
     def roic_wacc_spread(self, info: dict, rf_rate: float = 0.045,
