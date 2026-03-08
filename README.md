@@ -1,4 +1,4 @@
-# Stock Ranking Advisor v8
+# Stock Ranking Advisor v7
 
 [![Live App](https://img.shields.io/badge/Live%20App-investing--ml.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://investing-ml.streamlit.app/)
 
@@ -215,7 +215,7 @@ momentum = 0.10×r1m + 0.25×r3m + 0.35×r6m + 0.30×r12_1
 ```
 **Boosts:** Enhanced short squeeze (progressive 8%→28% float · volume surge) · sector outperformance vs ETF · EPS beat rate · revenue QoQ · Finnhub EPS surprise · **Jensen's alpha** (market-adjusted) · **52-week high proximity**
 
-**Short Squeeze Score (v8 enhanced):**
+**Short Squeeze Score (v7 enhanced):**
 ```
 squeeze = min(0.10, (short_pct − 0.08) × 0.50)  +  min(0.04, (vol_ratio − 1.2) × 0.04)
 # Activates at 8% float (was 15%) · volume surge amplifies signal
@@ -248,7 +248,7 @@ quality = Piotroski(9pt) × 0.60
         − Full Beneish M-Score fraud penalty
 ```
 
-**Full Beneish M-Score (v8 — 8-variable):**
+**Full Beneish M-Score (v7 — 8-variable):**
 ```
 M = -4.84 + 0.920×DSRI + 0.528×GMI + 0.404×AQI + 0.892×SGI
          + 0.115×DEPI  - 0.172×SGAI + 4.679×TATA - 0.327×LVGI
@@ -258,7 +258,7 @@ M > −1.78 → manipulation flag → quality penalty up to 12%
 # DSRI, DEPI use Beneish non-manipulator means where prior-year unavailable
 ```
 
-**ROIC Trend (v8 new):**
+**ROIC Trend (v7 new):**
 ```
 gap = earningsGrowth − revenueGrowth   # earnings outpacing revenue = margin expansion
 
@@ -326,7 +326,7 @@ Target:      FV × 1.20  (take profit)
 Stop loss:   entry × 0.92  (8% downside protection)
 ```
 
-### Reverse DCF — Implied Growth Analysis (v8 new)
+### Reverse DCF — Implied Growth Analysis (v7 new)
 
 **The most intellectually honest valuation check.** Instead of projecting forward, it asks: *"At the current price, what growth rate does the market already assume?"*
 
@@ -391,7 +391,7 @@ CVaR/VaR ratio > 1.3× = fat tails → crash-like behaviour
 
 ---
 
-## Anti-Thesis Engine (v8 new)
+## Anti-Thesis Engine (v7 new)
 
 Every high-conviction pick is automatically challenged by a structured **bear case** — the 10 strongest arguments against buying it. Forces conscious risk acceptance before deploying capital.
 
@@ -418,7 +418,7 @@ Flags sorted HIGH → MEDIUM → LOW. In the stock detail panel the expander **a
 
 ---
 
-## Tail-Risk Stress Testing (v8 new)
+## Tail-Risk Stress Testing (v7 new)
 
 Portfolio-level and per-stock tail risk analysis. Shown in the Risk & Quality tab.
 
@@ -484,7 +484,7 @@ flowchart TD
     style I fill:#3B82F6,color:#fff
 ```
 
-### CVaR-Adjusted Kelly Sizing (v8 upgraded)
+### CVaR-Adjusted Kelly Sizing (v7 upgraded)
 
 Standard Kelly uses historical variance as the denominator. In fat-tail environments, historical variance understates true risk — CVaR does not.
 
@@ -736,7 +736,7 @@ timeline
     v7 : Bug fixes · Earnings proximity scoring · Price freshness penalty
        : Forward alpha threshold fixed · Conviction logic corrected
        : EPS beat rate denominator fixed · SEC CIK deduplication
-    v8 : 3-Stage DCF · Earnings Power Value (EPV) · Reverse DCF
+    v7 : 3-Stage DCF · Earnings Power Value (EPV) · Reverse DCF
        : Full 8-variable Beneish M-Score
        : ROIC Trend (6-state directional signal)
        : CVaR (Expected Shortfall) · CVaR-adjusted Kelly sizing
@@ -745,7 +745,7 @@ timeline
        : Enhanced Short Squeeze (8% threshold · volume surge)
 ```
 
-### v8 — Quantitative Logic Upgrades
+### v7 — Quantitative Logic Upgrades
 
 **Valuation:**
 
