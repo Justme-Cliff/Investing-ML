@@ -310,7 +310,10 @@ class DataFetcher:
         self.yf_period = yf_period
         self.failed: List[str] = []
 
-    def fetch_universe(self, tickers: List[str]) -> Dict:
+    def fetch_universe(self, tickers: List[str], progress_callback=None) -> Dict:
+        """Fetch all tickers.  progress_callback(done: int, total: int) is called
+        after every ticker so callers (e.g. Streamlit) can update a progress bar
+        in real time instead of waiting for the entire fetch to finish."""
         results: Dict = {}
         total = len(tickers)
         done  = 0
@@ -329,6 +332,11 @@ class DataFetcher:
                 filled = int(pct / 5)
                 bar    = "█" * filled + "░" * (20 - filled)
                 print(f"  [{bar}] {pct:4.0f}%  {done}/{total}", end="\r", flush=True)
+                if progress_callback is not None:
+                    try:
+                        progress_callback(done, total)
+                    except Exception:
+                        pass  # never let a UI callback crash the fetch
             if bi < len(batches):
                 time.sleep(0.4)
 

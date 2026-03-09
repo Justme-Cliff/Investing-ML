@@ -923,7 +923,7 @@ def _factor_bars_html(ticker: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 def run_analysis(profile: UserProfile) -> dict:
     res  = {}
-    prog = st.progress(0, text="Fetching stock data from Yahoo Finance…")
+    prog = st.progress(1, text="Building stock universe…")
 
     if DYNAMIC_UNIVERSE:
         from advisor.universe import fetch_us_universe
@@ -942,8 +942,19 @@ def run_analysis(profile: UserProfile) -> dict:
         ]
         all_tickers = list(dict.fromkeys(all_tickers))
 
+    # ── Per-ticker progress callback: maps 0→100% fetch to 2→30% on the bar ──
+    _total_tickers = max(len(all_tickers), 1)
+
+    def _on_fetch_tick(done: int, total: int):
+        pct = 2 + int(done / total * 28)   # 2 % → 30 %
+        prog.progress(
+            pct,
+            text=f"Fetching stock data… {done} / {total}  ({pct - 2:.0f}%)",
+        )
+
     fetcher              = DataFetcher(profile.yf_period)
-    res["universe_data"] = fetcher.fetch_universe(all_tickers)
+    res["universe_data"] = fetcher.fetch_universe(all_tickers,
+                                                   progress_callback=_on_fetch_tick)
 
     # Post-fetch sector exclusion (applies in both modes)
     if profile.excluded_sectors and res["universe_data"]:
@@ -952,13 +963,14 @@ def run_analysis(profile: UserProfile) -> dict:
             if d.get("sector", "Unknown") not in profile.excluded_sectors
         }
 
+    prog.progress(31, text="Fetching S&P 500 benchmark…")
     res["sp500_hist"]    = fetcher.fetch_sp500()
-    prog.progress(28, text="Fetching macro data (VIX · 10Y yield · sector ETFs)…")
+    prog.progress(33, text="Fetching macro data (VIX · 10Y yield · sector ETFs)…")
 
     res["macro_data"] = MacroFetcher().fetch()
     rf_rate           = (res["macro_data"].get("yield_10y") or 4.5) / 100
     res["rf_rate"]    = rf_rate
-    prog.progress(42, text="Scoring stocks on 7 factors…")
+    prog.progress(40, text="Scoring stocks on 7 factors…")
 
     memory  = SessionMemory(); memory.load()
     adapted = memory.get_adapted_weights(profile.risk_level, profile.time_horizon)
@@ -1015,7 +1027,7 @@ def run_analysis(profile: UserProfile) -> dict:
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
     # ── Tier 2 enrichment: options flow + Google Trends + Reddit ──────────────
-    prog.progress(46, text="Enriching top 30 with options flow + retail sentiment…")
+    prog.progress(50, text="Enriching top 30 with options flow + retail sentiment…")
     try:
         from advisor.alternative_data import enrich_top_n
         ranked_df = enrich_top_n(ranked_df, res["universe_data"], res["macro_data"], n=30)
@@ -1053,14 +1065,14 @@ def run_analysis(profile: UserProfile) -> dict:
             ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
 
     res["ranked_df"] = ranked_df
-    prog.progress(56, text="Building portfolio (correlation-aware selection)…")
+    prog.progress(62, text="Building portfolio (correlation-aware selection)…")
 
     constructor  = PortfolioConstructor(n=PORTFOLIO_N)
     top10        = constructor.select(res["ranked_df"], res["universe_data"], profile.risk_level)
     res["top10"] = constructor.size_positions(top10, profile.portfolio_size,
                                                macro_data=res.get("macro_data"),
                                                universe_data=res.get("universe_data"))
-    prog.progress(66, text="Running valuation + risk in parallel…")
+    prog.progress(72, text="Running valuation + risk in parallel…")
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TOut
     from config import PIPELINE_CONFIG as _PC
@@ -1078,7 +1090,7 @@ def run_analysis(profile: UserProfile) -> dict:
             res["risk"] = _fr.result(timeout=_timeout)
         except _TOut:
             res["risk"] = {}
-    prog.progress(90, text="Running 7-gate investment protocol…")
+    prog.progress(88, text="Running 7-gate investment protocol…")
 
     res["protocol"] = ProtocolAnalyzer().analyze_all(
         res["top10"], res["universe_data"], res["valuation"]

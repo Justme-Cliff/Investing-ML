@@ -1,4 +1,4 @@
-# Stock Ranking Advisor v7
+# Stock Ranking Advisor v7.1.0
 
 [![Live App](https://img.shields.io/badge/Live%20App-investing--ml.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://investing-ml.streamlit.app/)
 
@@ -743,6 +743,20 @@ timeline
        : Anti-Thesis Engine (10 structural red-flag checks)
        : Tail-Risk Stress Testing (portfolio CVaR + 3 macro scenarios)
        : Enhanced Short Squeeze (8% threshold · volume surge)
+    v7.1.0 : 32-fix correctness + reliability release
+           : Partial Beneish M-Score (6-var model when DSRI/DEPI unavailable)
+           : Sector-aware DCF growth caps (per-industry ceilings)
+           : Parallelised ValuationEngine + RiskEngine (2× faster)
+           : Spearman correlation everywhere (rank-based, outlier-resistant)
+           : Google Trends batching (5 tickers/call, 5× fewer rate-limit errors)
+           : Exponential learning-rate schedule (meaningful growth for 50+ sessions)
+           : Pattern TTL pruning (removes stale archetypes after 90 days)
+           : Gate 4 SPLIT badge (flags ValuationEngine vs fundamentals divergence)
+           : Regime signal breakdown table (6 live macro signals in Tab 6)
+           : API key health check at CLI startup
+           : Progressive web progress bar (updates per ticker, not per batch)
+           : Settings schema validation (corrupted settings.json handled gracefully)
+           : All magic numbers moved to named config blocks
 ```
 
 ### v7 — Quantitative Logic Upgrades
@@ -776,6 +790,56 @@ timeline
 |---------|-------------|
 | **Anti-Thesis Engine** | 10 structural checks challenge every Buy signal: leverage, accruals, FCF/NI divergence, negative FCF, revenue deceleration, Altman Z zone, short interest, Piotroski failures, SG&A bloat, earnings deterioration. Flags sorted HIGH → MEDIUM → LOW. Expander auto-opens when HIGH flags exist. |
 | **Tail-Risk Stress Testing** | Portfolio CVaR + per-stock stress scenarios: Rate Shock (+200bps, beta-scaled), Recession (worst 2% hist monthly), Liquidity Crunch (VaR × 1.5). Worst-day avg shows hidden macro correlation. VaR vs CVaR grouped bar chart. |
+
+---
+
+## v7.1.0 — What's New
+
+A focused correctness and reliability release. 32 fixes across every module — no new features that weren't there before, just the existing features working the way they were always supposed to.
+
+### Bug Fixes — Results Were Wrong
+
+| Fix | File | What Was Wrong | What's Fixed |
+|-----|------|---------------|-------------|
+| **Beneish M-Score partial model** | `risk.py` | Missing DSRI/DEPI used sample means, silently inflating/deflating fraud scores | 6-variable partial model with adjusted intercept (−4.27). Result flags `"partial_model": True` |
+| **Data quality defaults** | `scorer.py` | `data_quality_score` defaulted to `100` when missing — rewarded absent data | Defaults changed to `0` and `50`. Missing data now penalises scores |
+| **Graham Number on wrong sectors** | `valuation.py` | Applied to Tech/Healthcare/Comms where book value is meaningless | Skipped entirely for Technology, Healthcare, Communication Services, Unknown |
+| **Gate 5 ATH scoring inverted** | `protocol.py` | Stocks at 52-week highs (momentum breakouts) scored **10** — worst possible | Breakout ≥ ATH → 72 pts. Near-ATH → 30 pts. Deep pullback → 90 pts |
+| **Continuity bonus overwritten** | `main.py`, `app.py` | +3pt continuity bonus applied before Tier 2 enrichment, which then overwrote it | Moved to after enrichment in both pipelines |
+| **Learning rate ceiling** | `learner.py` | `sqrt(n)` formula hit ceiling after ~13 sessions | Exponential schedule: meaningful growth through 50+ sessions |
+| **Portfolio beta not weighted** | `portfolio.py` | Beta cap used simple mean — tiny high-beta positions skewed the reading | Beta now score-weighted (proportional to position size) |
+| **Earnings lambda crash** | `scorer.py` | `int(x)` on a string `earnings_days_away` threw `ValueError` | Replaced with `is_imminent_earnings()` — handles None, NaN, strings safely |
+
+### Performance Improvements
+
+| Improvement | Impact |
+|-------------|--------|
+| **Parallel valuation + risk** (`main.py`, `app.py`) | `ValuationEngine` and `RiskEngine` run simultaneously via `ThreadPoolExecutor`. Saves 30–60 seconds per run |
+| **Google Trends batching** (`alternative_data.py`) | 5 tickers per API call instead of 1-at-a-time. ~5× fewer rate-limit errors, much faster Tier 2 enrichment |
+| **Progressive web progress bar** (`app.py`, `fetcher.py`) | Bar now updates after every single ticker fetch (0%→30%) instead of jumping from 0% to 28% when all 500 are done |
+
+### New Visibility & Observability
+
+| Feature | Where |
+|---------|-------|
+| **API key health check** | CLI startup — prints ✓/✗/— for all 5 services before analysis begins |
+| **Gate 4 SPLIT badge** | Protocol Gates tab — amber badge when ValuationEngine and traditional metrics diverge >30 pts |
+| **Regime signal breakdown table** | Tab 6 Macro — shows all 6 live signals (VIX, 10Y yield, yield spread, HY spread, recession prob, consumer sentiment) with color-coded status and thresholds |
+| **Source failure warnings** | Console — warns when Tier 2 sources (options, Trends, Reddit, AV, FMP) fail >50% of tickers |
+| **Fresh picks empty state** | Dashboard — `st.info()` message when fresh picks mode is on but no prior session history exists |
+| **Version display** | CLI banner + Streamlit sidebar footer both show `v7.1.0` |
+
+### Architecture & Correctness
+
+| Change | Detail |
+|--------|--------|
+| **Spearman correlation everywhere** | Portfolio construction and dashboard heatmap use `method="spearman"` — rank-based, outlier-resistant, accurate for return distributions |
+| **Sector-aware DCF growth caps** | Per-industry ceilings in `SECTOR_GROWTH_CAP`: Technology→45%, Utilities→10%, etc. Previously all sectors capped at 25% |
+| **All magic numbers in config** | `PIPELINE_CONFIG`, `VALUATION_CONFIG`, `PROTOCOL_CONFIG`, `LEARNER_CONFIG` — every tunable constant in one place |
+| **Pattern TTL pruning** | Stale learning archetypes removed after 90 days. Graveyard anti-patterns are exempt |
+| **Settings schema validation** | `_load_settings()` validates every field against `_SETTINGS_SCHEMA` — bad values fall back to defaults gracefully |
+| **Analyst score deduplicated** | Shared `analyst_score()` in `advisor/utils.py` — was duplicated between scorer and CLI commands |
+| **Kelly fallback warning** | `RuntimeWarning` emitted when Kelly fractions are degenerate, instead of silently switching to score-weighted |
 
 ---
 
