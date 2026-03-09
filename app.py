@@ -15,7 +15,7 @@ st.set_page_config(
     page_title="Stock Advisor",
     page_icon=None,
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 import pandas as pd
@@ -27,6 +27,7 @@ from config import (
     STOCK_UNIVERSE, WEIGHT_MATRIX, FACTOR_NAMES,
     RISK_LABELS, GOAL_LABELS, HORIZON_LABELS,
     DYNAMIC_UNIVERSE, UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS, PORTFOLIO_N,
+    FRESH_PICKS_PENALTY, VERSION,
 )
 from advisor.collector    import UserProfile
 from advisor.fetcher      import DataFetcher, MacroFetcher
@@ -109,10 +110,19 @@ THEMES = {
 
 DEFAULT_SETTINGS = {
     "theme":          "Terminal",
-    "fresh_penalty":  22,
+    "fresh_penalty":  FRESH_PICKS_PENALTY,
     "n_sessions":     2,
     "learning_rate":  0.04,
     "signal_mode":    "Balanced",
+}
+
+
+_SETTINGS_SCHEMA = {
+    "theme":         (str,   lambda v: v in THEMES,                            "Terminal"),
+    "fresh_penalty": (float, lambda v: 0 <= v <= 50,                           FRESH_PICKS_PENALTY),
+    "n_sessions":    (int,   lambda v: 1 <= v <= 10,                            2),
+    "learning_rate": (float, lambda v: 0.001 <= v <= 0.5,                       0.04),
+    "signal_mode":   (str,   lambda v: v in ("Balanced", "Value", "Momentum"),  "Balanced"),
 }
 
 
@@ -120,8 +130,18 @@ def _load_settings() -> dict:
     try:
         if os.path.exists(SETTINGS_FILE):
             with open(SETTINGS_FILE) as f:
-                data = json.load(f)
-            return {**DEFAULT_SETTINGS, **data}
+                raw = json.load(f)
+            out = {}
+            for key, (typ, validator, default) in _SETTINGS_SCHEMA.items():
+                val = raw.get(key, DEFAULT_SETTINGS.get(key, default))
+                try:
+                    val = typ(val)
+                    if not validator(val):
+                        val = default
+                except Exception:
+                    val = default
+                out[key] = val
+            return out
     except Exception:
         pass
     return dict(DEFAULT_SETTINGS)
@@ -994,7 +1014,16 @@ def run_analysis(profile: UserProfile) -> dict:
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
-    # Portfolio continuity bonus — mirrors main.py logic
+    # ── Tier 2 enrichment: options flow + Google Trends + Reddit ──────────────
+    prog.progress(46, text="Enriching top 30 with options flow + retail sentiment…")
+    try:
+        from advisor.alternative_data import enrich_top_n
+        ranked_df = enrich_top_n(ranked_df, res["universe_data"], res["macro_data"], n=30)
+    except Exception:
+        pass   # enrichment is best-effort; pipeline continues regardless
+
+    # Portfolio continuity bonus — applied AFTER enrichment so enrichment scores
+    # don't overwrite the bonus. Disabled in fresh-picks mode.
     if not profile.avoid_recent:
         _cont_tickers = memory.get_recent_tickers(n_sessions=1)
         if _cont_tickers:
@@ -1007,20 +1036,14 @@ def run_analysis(profile: UserProfile) -> dict:
             ).reset_index(drop=True)
             ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
-    # ── Tier 2 enrichment: options flow + Google Trends + Reddit ──────────────
-    prog.progress(46, text="Enriching top 30 with options flow + retail sentiment…")
-    try:
-        from advisor.alternative_data import enrich_top_n
-        ranked_df = enrich_top_n(ranked_df, res["universe_data"], res["macro_data"], n=30)
-    except Exception:
-        pass   # enrichment is best-effort; pipeline continues regardless
-
     # Fresh picks mode: penalise tickers from recent sessions
     if profile.avoid_recent:
         _cfg           = st.session_state.get("settings", DEFAULT_SETTINGS)
         _n_sess        = int(_cfg.get("n_sessions", 2))
-        _penalty       = float(_cfg.get("fresh_penalty", 22))
+        _penalty       = float(_cfg.get("fresh_penalty", FRESH_PICKS_PENALTY))
         recent_tickers = memory.get_recent_tickers(n_sessions=_n_sess)
+        if not recent_tickers:
+            st.info("Fresh picks mode: no prior session picks found — all stocks eligible.")
         if recent_tickers:
             PENALTY = _penalty
             mask = ranked_df["ticker"].isin(recent_tickers)
@@ -1037,12 +1060,24 @@ def run_analysis(profile: UserProfile) -> dict:
     res["top10"] = constructor.size_positions(top10, profile.portfolio_size,
                                                macro_data=res.get("macro_data"),
                                                universe_data=res.get("universe_data"))
-    prog.progress(66, text="Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF)…")
+    prog.progress(66, text="Running valuation + risk in parallel…")
 
-    res["valuation"] = ValuationEngine(rf_rate).analyze_all(res["top10"], res["universe_data"])
-    prog.progress(78, text="Computing risk metrics (Altman Z · Sharpe · Sortino · Piotroski)…")
-
-    res["risk"] = RiskEngine().analyze_all(res["top10"], res["universe_data"], rf_rate)
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TOut
+    from config import PIPELINE_CONFIG as _PC
+    _timeout = _PC.get("engine_timeout", 120)
+    _engine_v = ValuationEngine(rf_rate)
+    _engine_r = RiskEngine()
+    with ThreadPoolExecutor(max_workers=2) as _exe:
+        _fv = _exe.submit(_engine_v.analyze_all, res["top10"], res["universe_data"])
+        _fr = _exe.submit(_engine_r.analyze_all, res["top10"], res["universe_data"], rf_rate)
+        try:
+            res["valuation"] = _fv.result(timeout=_timeout)
+        except _TOut:
+            res["valuation"] = {}
+        try:
+            res["risk"] = _fr.result(timeout=_timeout)
+        except _TOut:
+            res["risk"] = {}
     prog.progress(90, text="Running 7-gate investment protocol…")
 
     res["protocol"] = ProtocolAnalyzer().analyze_all(
@@ -1144,6 +1179,11 @@ def render_sidebar():
         with col_b3:
             cal_btn  = st.button("Calendar", type="secondary", use_container_width=True)
         settings_btn = st.button("⚙️  Settings", type="secondary", use_container_width=True)
+        st.markdown(
+            f'<div style="text-align:center;font-size:11px;color:#4B5563;margin-top:12px">'
+            f'v{VERSION}</div>',
+            unsafe_allow_html=True,
+        )
 
     profile = UserProfile(
         portfolio_size    = float(portfolio_size),
@@ -2001,9 +2041,18 @@ def tab_protocol(top10, protocol):
             sym = "●" if status == "pass" else "◐" if status == "warn" else "○"
             gate_dots += f'<span style="color:{c};font-size:15px">{sym}</span> '
 
+        # Gate 4 disagreement badge — shown when ValuationEngine and traditional
+        # metrics diverge by more than 30 points (signals conflicting evidence)
+        g4d = p.get("gate4_detail", {})
+        disagree_badge = (
+            f' <span style="background:{AMBER};color:#000;font-size:10px;'
+            f'font-weight:700;padding:1px 5px;border-radius:3px">SPLIT</span>'
+            if g4d.get("disagreement") else ""
+        )
+
         rows += (
             f'<tr>'
-            f'<td><b>{t}</b></td>'
+            f'<td><b>{t}</b>{disagree_badge}</td>'
             f'<td>{gate_dots}</td>'
             f'<td style="color:{GREEN};font-weight:700">{p.get("pass_count",0)}</td>'
             f'<td style="color:{AMBER};font-weight:700">{p.get("warn_count",0)}</td>'
@@ -2158,6 +2207,32 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
             unsafe_allow_html=True,
         )
 
+        # ── Regime signal breakdown ────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(shdr("Regime Signal Breakdown"), unsafe_allow_html=True)
+        _vix_v  = macro.get("vix") or 0
+        _y10    = macro.get("yield_10y") or 0
+        _y3m    = macro.get("yield_3m") or 0
+        _spread = round(_y10 - _y3m, 2) if _y10 and _y3m else None
+        _hy     = macro.get("hy_spread")
+        _rec    = macro.get("recession_prob")
+        _cs     = macro.get("consumer_sentiment")
+        _regime_rows = [
+            ("VIX",               f"{_vix_v:.1f}" if _vix_v else "N/A",  "&gt;25 = risk-off",    RED if _vix_v > 25 else AMBER if _vix_v > 18 else GREEN),
+            ("10Y Yield",         f"{_y10:.2f}%"  if _y10  else "N/A",   "&gt;5% = restrictive", RED if _y10 > 5 else AMBER if _y10 > 4 else GREEN),
+            ("Yield Spread",      f"{_spread:+.2f}%" if _spread is not None else "N/A", "&lt;0 = inverted", RED if (_spread or 0) < 0 else GREEN),
+            ("HY Spread",         f"{_hy:.2f}%"   if _hy   else "N/A",   "&gt;5% = stress",      RED if (_hy or 0) > 5 else AMBER if (_hy or 0) > 3.5 else GREEN),
+            ("Recession Prob",    f"{_rec:.1f}%"  if _rec  else "N/A",   "&gt;20% = caution",    RED if (_rec or 0) > 20 else AMBER if (_rec or 0) > 10 else GREEN),
+            ("Consumer Sentiment",f"{_cs:.1f}"    if _cs   else "N/A",   "&lt;70 = weak demand", RED if (_cs or 100) < 70 else AMBER if (_cs or 100) < 80 else GREEN),
+        ]
+        _rg_html = '<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        _rg_html += '<tr><th style="text-align:left;padding:3px 6px;color:#6B7280">Signal</th><th style="text-align:right;padding:3px 6px;color:#6B7280">Value</th><th style="text-align:left;padding:3px 6px;color:#6B7280">Threshold</th></tr>'
+        for _label, _val, _thresh, _col in _regime_rows:
+            _dot = f'<span style="color:{_col};font-size:14px">&#9679;</span>'
+            _rg_html += f'<tr><td style="padding:3px 6px">{_dot} {_label}</td><td style="text-align:right;font-family:monospace;font-weight:600;padding:3px 6px">{_val}</td><td style="padding:3px 6px;color:#6B7280;font-size:11px">{_thresh}</td></tr>'
+        _rg_html += '</table>'
+        st.markdown(_rg_html, unsafe_allow_html=True)
+
         etf = macro.get("sector_etf", {})
         if etf:
             st.markdown("<br>", unsafe_allow_html=True)
@@ -2242,7 +2317,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
 
         if len(ret_dict) >= 3:
             ret_df   = pd.DataFrame(ret_dict).dropna()
-            corr_mat = ret_df.corr()
+            corr_mat = ret_df.corr(method="spearman")
             tks      = corr_mat.columns.tolist()
             txt_m    = [[f"{corr_mat.iloc[r, c]:.2f}" for c in range(len(tks))]
                         for r in range(len(tks))]

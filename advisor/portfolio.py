@@ -1,6 +1,7 @@
 # advisor/portfolio.py — Correlation-aware greedy stock selection + Kelly position sizing
 
 import math
+import warnings as _warnings
 from collections import Counter
 from typing import Dict, List, Optional
 
@@ -8,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from advisor.fetcher import DataFetcher
+from config import PIPELINE_CONFIG
 
 
 class PortfolioConstructor:
@@ -25,9 +27,10 @@ class PortfolioConstructor:
     Falls back to score-weighted if Kelly produces degenerate sizes.
     """
 
-    def __init__(self, n: int = 10, candidate_pool: int = 30):
+    def __init__(self, n: int = 10, candidate_pool: int = None):
         self.n              = n
-        self.candidate_pool = candidate_pool
+        self.candidate_pool = candidate_pool or PIPELINE_CONFIG["candidate_pool"]
+        self.kelly_fallback = False
 
     def select(self, ranked_df: pd.DataFrame, universe_data: Dict,
                risk_level: int = 2) -> pd.DataFrame:
@@ -75,7 +78,7 @@ class PortfolioConstructor:
         # algorithm doesn't give up prematurely when good candidates exist but
         # fall just outside the strict cutoff. Stops early when portfolio beta
         # is within target or no better alternative is available.
-        _beta_targets = {1: 0.90, 2: 1.05, 3: 1.30, 4: 1.60}
+        _beta_targets = PIPELINE_CONFIG["beta_targets"]
         beta_target   = _beta_targets.get(risk_level, 1.10)
         extended      = ranked_df.head(min(50, len(ranked_df)))
 
@@ -83,8 +86,14 @@ class PortfolioConstructor:
             for _pass, _threshold in enumerate([0.15, 0.05, 0.0]):
                 sel_df    = ranked_df[ranked_df["ticker"].isin(selected)][
                     ["ticker", "beta", "composite_score"]
-                ]
-                port_beta = float(sel_df["beta"].mean())
+                ].copy()
+                # Weighted portfolio beta (score-weighted, not simple mean)
+                _total_sc = sel_df["composite_score"].sum()
+                if _total_sc > 0:
+                    sel_df["_wt"] = sel_df["composite_score"] / _total_sc
+                    port_beta = float((sel_df["beta"] * sel_df["_wt"]).sum())
+                else:
+                    port_beta = float(sel_df["beta"].mean())
 
                 if port_beta <= beta_target:
                     break   # within target — no more swaps needed
@@ -230,12 +239,18 @@ class PortfolioConstructor:
         total_k = sum(kelly_raw)
         if total_k <= 0 or any(math.isnan(k) for k in kelly_raw):
             # Fallback: score-weighted
+            _warnings.warn(
+                "Kelly sizing failed (degenerate fractions) — using score-weighted allocation.",
+                RuntimeWarning, stacklevel=2,
+            )
+            self.kelly_fallback = True
             total_s = df["composite_score"].sum()
             df["weight"] = df["composite_score"] / total_s
         else:
+            self.kelly_fallback = False
             weights = [k / total_k for k in kelly_raw]
-            # Cap each at 15% — appropriate for a 15-stock portfolio
-            weights = [min(w, 0.15) for w in weights]
+            _pos_cap = PIPELINE_CONFIG["position_cap"]
+            weights = [min(w, _pos_cap) for w in weights]
             total_w = sum(weights)
             weights = [w / total_w for w in weights]
             df["weight"] = weights
@@ -263,4 +278,4 @@ class PortfolioConstructor:
 
         ret_df = pd.DataFrame(returns)
         ret_df = ret_df.dropna()
-        return ret_df.corr()
+        return ret_df.corr(method="spearman")

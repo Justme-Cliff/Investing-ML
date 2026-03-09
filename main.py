@@ -16,6 +16,7 @@ from config import (
     STOCK_UNIVERSE, DYNAMIC_UNIVERSE,
     UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS,
     WEIGHT_MATRIX, PORTFOLIO_N,
+    VERSION, FRESH_PICKS_PENALTY, check_api_keys,
 )
 
 from advisor.collector    import InputCollector
@@ -35,6 +36,18 @@ from advisor.cli_commands import CommandHandler
 def main():
     display = TerminalDisplay()
     memory  = SessionMemory()
+
+    # ── Version banner ────────────────────────────────────────────────────────
+    print(f"\n  Stock Ranking Advisor  v{VERSION}\n")
+
+    # ── API key health check ──────────────────────────────────────────────────
+    print("  Checking API key status...")
+    _key_status = check_api_keys()
+    _icons = {True: "✓", False: "✗", None: "—"}
+    for _svc, _ok in _key_status.items():
+        _label = "active" if _ok else ("invalid" if _ok is False else "not configured")
+        print(f"    {_icons[_ok]}  {_svc:<14} {_label}")
+    print()
 
     # ── 1. Load memory + show track record ───────────────────────────────────
     memory.load()
@@ -168,10 +181,16 @@ def main():
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
     ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
-    # ── 5b-cont. Portfolio continuity bonus (transaction cost simulation) ─────
-    # Selling and re-buying a position costs ~0.1–0.2% in round-trip friction.
-    # A small +3pt bonus to last session's picks simulates this avoided cost,
-    # favouring continuation of winning positions over churn.
+    # ── 5d. Tier 2 enrichment — options flow + Google Trends + Reddit ─────────
+    try:
+        from advisor.alternative_data import enrich_top_n
+        ranked_df = enrich_top_n(ranked_df, universe_data, macro_data, n=30)
+        print("  Enrichment complete — options flow + retail sentiment applied.\n")
+    except Exception as _e:
+        print(f"  Enrichment skipped ({_e}).\n")
+
+    # ── 5b-cont. Portfolio continuity bonus (after enrichment) ────────────────
+    # Applied AFTER Tier 2 enrichment so enrichment scores don't overwrite the bonus.
     # Disabled in fresh-picks mode so the user's rotation intent is respected.
     if not profile.avoid_recent:
         _cont_tickers = memory.get_recent_tickers(n_sessions=1)
@@ -185,19 +204,11 @@ def main():
             ).reset_index(drop=True)
             ranked_df["rank"] = range(1, len(ranked_df) + 1)
 
-    # ── 5d. Tier 2 enrichment — options flow + Google Trends + Reddit ─────────
-    try:
-        from advisor.alternative_data import enrich_top_n
-        ranked_df = enrich_top_n(ranked_df, universe_data, macro_data, n=30)
-        print("  Enrichment complete — options flow + retail sentiment applied.\n")
-    except Exception as _e:
-        print(f"  Enrichment skipped ({_e}).\n")
-
     # ── 5c. Apply fresh-picks penalty (optional) ──────────────────────────────
     if profile.avoid_recent:
         recent_tickers = memory.get_recent_tickers(n_sessions=2)
         if recent_tickers:
-            PENALTY = 22.0   # points knocked off composite_score for repeat picks
+            PENALTY = FRESH_PICKS_PENALTY
             mask = ranked_df["ticker"].isin(recent_tickers)
             ranked_df.loc[mask, "composite_score"] = (
                 ranked_df.loc[mask, "composite_score"] - PENALTY
@@ -216,15 +227,30 @@ def main():
     display.show_results(top10_sized)
     display.show_allocation(top10_sized, profile.portfolio_size)
 
-    # ── 8. Multi-method valuation (DCF · Graham · EV/EBITDA · FCF yield) ─────
-    print("Running multi-method valuation (DCF · Graham · EV/EBITDA · FCF yield)...")
-    valuation_results = ValuationEngine(rf_rate).analyze_all(top10_sized, universe_data)
-    print(f"  Valuation complete — {len(valuation_results)} stocks valued.\n")
+    # ── 8+9. Valuation + Risk in parallel (independent analyses) ─────────────
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TOut
+    from config import PIPELINE_CONFIG as _PC
+    _timeout = _PC.get("engine_timeout", 120)
 
-    # ── 9. Risk & quality metrics (Altman Z · Sharpe · Sortino · ROIC/WACC) ──
-    print("Computing risk & quality metrics (Altman Z · Sharpe · Sortino · ROIC/WACC · Piotroski)...")
-    risk_results = RiskEngine().analyze_all(top10_sized, universe_data, rf_rate)
-    print(f"  Risk analysis complete — {len(risk_results)} stocks analyzed.\n")
+    print("Running multi-method valuation + risk analysis (parallel)...")
+    _engine_v = ValuationEngine(rf_rate)
+    _engine_r = RiskEngine()
+
+    with ThreadPoolExecutor(max_workers=2) as _exe:
+        _fv = _exe.submit(_engine_v.analyze_all, top10_sized, universe_data)
+        _fr = _exe.submit(_engine_r.analyze_all, top10_sized, universe_data, rf_rate)
+        try:
+            valuation_results = _fv.result(timeout=_timeout)
+            print(f"  Valuation complete — {len(valuation_results)} stocks valued.")
+        except _TOut:
+            print("  Warning: Valuation timed out — using partial results.")
+            valuation_results = {}
+        try:
+            risk_results = _fr.result(timeout=_timeout)
+            print(f"  Risk analysis complete — {len(risk_results)} stocks analyzed.\n")
+        except _TOut:
+            print("  Warning: Risk analysis timed out — using partial results.\n")
+            risk_results = {}
 
     # ── 10. Investment protocol analysis (7 gates) ────────────────────────────
     print("Running 7-gate investment protocol analysis...")

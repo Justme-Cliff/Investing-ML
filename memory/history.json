@@ -12384,6 +12384,1695 @@
           }
         }
       ]
+    },
+    {
+      "session_id": "57922541",
+      "timestamp": "2026-03-09T16:11:34.075471+00:00",
+      "macro_regime": "risk_off",
+      "macro_snapshot": {
+        "regime": "risk_off",
+        "vix": 27.829999923706055,
+        "yield_10y": 4.133999824523926,
+        "crash_signals": 0
+      },
+      "profile": {
+        "risk_level": 3,
+        "time_horizon": "long",
+        "goal": "speculative"
+      },
+      "sp500_entry": 6706.52978515625,
+      "evaluations": {},
+      "evaluation": null,
+      "evaluated": false,
+      "picks": [
+        {
+          "ticker": "SLDE",
+          "price_entry": 18.149999618530273,
+          "composite_score": 100.0,
+          "sector": "Financials",
+          "factors": {
+            "momentum": 80.52851182197497,
+            "volatility": 20.445062586926284,
+            "value": 90.98591549295774,
+            "quality": 92.07232267037551,
+            "technical": 99.44367176634215,
+            "sentiment": 56.5,
+            "dividend": 16.481223922114047
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 67.98,
+            "entry_low": 54.38,
+            "entry_high": 61.18,
+            "target": 81.58,
+            "stop_loss": 50.03,
+            "signal": "STRONG_BUY",
+            "upside_pct": 349.5,
+            "rr_ratio": null,
+            "premium_pct": -73.3,
+            "estimates": {
+              "dcf": 165.63,
+              "graham": 26.06,
+              "ev_ebitda": 67.98,
+              "fcf_yield": 80.41,
+              "epv": 50.97
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 102.78,
+                "growth_rate": 9.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -82.3
+              },
+              "Base": {
+                "fair_value": 165.63,
+                "growth_rate": 18.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -89.0
+              },
+              "Bull": {
+                "fair_value": 199.65,
+                "growth_rate": 21.6,
+                "signal": "STRONG_BUY",
+                "premium_pct": -90.9
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": -0.09,
+            "sortino": -0.17,
+            "max_drawdown_pct": -45.3,
+            "var_95_pct": -25.9,
+            "roic_wacc": {
+              "roic": 15.3,
+              "wacc": 9.3,
+              "spread": 6.0,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              94.1,
+              84.0,
+              50.7,
+              95.1,
+              89.2,
+              60.0,
+              81.4
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "pass",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 1,
+            "fail_count": 0,
+            "overall_score": 81.8,
+            "conviction": "HIGH"
+          }
+        },
+        {
+          "ticker": "BMY",
+          "price_entry": 59.40489959716797,
+          "composite_score": 100.0,
+          "sector": "Healthcare",
+          "factors": {
+            "momentum": 81.08484005563282,
+            "volatility": 90.68150208623088,
+            "value": 75.77464788732394,
+            "quality": 86.36995827538247,
+            "technical": 70.09735744089014,
+            "sentiment": 54.5,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 149.86,
+            "entry_low": 119.89,
+            "entry_high": 134.87,
+            "target": 179.83,
+            "stop_loss": 110.3,
+            "signal": "STRONG_BUY",
+            "upside_pct": 202.7,
+            "rr_ratio": null,
+            "premium_pct": -60.4,
+            "estimates": {
+              "dcf": 438.33,
+              "ev_ebitda": 132.26,
+              "fcf_yield": 76.73,
+              "epv": 167.46
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 178.61,
+                "growth_rate": 17.5,
+                "signal": "STRONG_BUY",
+                "premium_pct": -66.7
+              },
+              "Base": {
+                "fair_value": 438.33,
+                "growth_rate": 35.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -86.4
+              },
+              "Bull": {
+                "fair_value": 615.43,
+                "growth_rate": 42.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -90.3
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.09,
+            "sortino": 0.14,
+            "max_drawdown_pct": -47.7,
+            "var_95_pct": -10.4,
+            "roic_wacc": {
+              "roic": 10.3,
+              "wacc": 1.6,
+              "spread": 8.7,
+              "verdict": "STRONG"
+            },
+            "piotroski": {
+              "score": 4,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "WEAK"
+            }
+          },
+          "protocol": {
+            "gates": [
+              80.3,
+              96.0,
+              52.5,
+              92.4,
+              48.3,
+              55.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "warn",
+              "warn",
+              "pass"
+            ],
+            "pass_count": 4,
+            "warn_count": 3,
+            "fail_count": 0,
+            "overall_score": 76.2,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "PAHC",
+          "price_entry": 46.810001373291016,
+          "composite_score": 99.57653924272381,
+          "sector": "Healthcare",
+          "factors": {
+            "momentum": 90.40333796940195,
+            "volatility": 37.552155771905426,
+            "value": 62.81690140845071,
+            "quality": 84.14464534075104,
+            "technical": 62.03059805285118,
+            "sentiment": 42.72,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 102.94,
+            "entry_low": 82.35,
+            "entry_high": 92.64,
+            "target": 123.52,
+            "stop_loss": 75.76,
+            "signal": "STRONG_BUY",
+            "upside_pct": 163.9,
+            "rr_ratio": null,
+            "premium_pct": -54.5,
+            "estimates": {
+              "dcf": 62.26,
+              "ev_ebitda": 143.61,
+              "fcf_yield": 14.81,
+              "epv": 185.22
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 26.03,
+                "growth_rate": 17.5,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 79.9
+              },
+              "Base": {
+                "fair_value": 62.26,
+                "growth_rate": 35.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -24.8
+              },
+              "Bull": {
+                "fair_value": 86.76,
+                "growth_rate": 42.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -46.0
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.47,
+            "sortino": 0.8,
+            "max_drawdown_pct": -65.7,
+            "var_95_pct": -15.5,
+            "roic_wacc": {
+              "roic": 8.3,
+              "wacc": 1.4,
+              "spread": 6.9,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              80.9,
+              41.0,
+              61.1,
+              85.0,
+              60.8,
+              55.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "warn",
+              "pass",
+              "pass",
+              "pass",
+              "warn",
+              "pass"
+            ],
+            "pass_count": 5,
+            "warn_count": 2,
+            "fail_count": 0,
+            "overall_score": 69.0,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "AMGN",
+          "price_entry": 367.44500732421875,
+          "composite_score": 99.10376146310898,
+          "sector": "Healthcare",
+          "factors": {
+            "momentum": 81.50208623087622,
+            "volatility": 89.84700973574408,
+            "value": 48.732394366197184,
+            "quality": 95.82753824756607,
+            "technical": 78.99860917941585,
+            "sentiment": 55.76,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 465.11,
+            "entry_low": 372.08,
+            "entry_high": 418.59,
+            "target": 558.13,
+            "stop_loss": 342.32,
+            "signal": "STRONG_BUY",
+            "upside_pct": 51.9,
+            "rr_ratio": 7.6,
+            "premium_pct": -21.0,
+            "estimates": {
+              "dcf": 1114.44,
+              "ev_ebitda": 407.31,
+              "fcf_yield": 195.07,
+              "epv": 522.9
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 454.11,
+                "growth_rate": 17.5,
+                "signal": "BUY",
+                "premium_pct": -19.1
+              },
+              "Base": {
+                "fair_value": 1114.44,
+                "growth_rate": 35.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -67.0
+              },
+              "Bull": {
+                "fair_value": 1564.7,
+                "growth_rate": 42.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -76.5
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.48,
+            "sortino": 0.7,
+            "max_drawdown_pct": -24.9,
+            "var_95_pct": -8.5,
+            "roic_wacc": {
+              "roic": 7.9,
+              "wacc": 0.9,
+              "spread": 7.1,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 5,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              85.9,
+              96.0,
+              41.8,
+              85.0,
+              45.0,
+              60.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "warn",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 5,
+            "warn_count": 2,
+            "fail_count": 0,
+            "overall_score": 74.2,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "VAL",
+          "price_entry": 88.58999633789062,
+          "composite_score": 97.9194531465514,
+          "sector": "Energy",
+          "factors": {
+            "momentum": 94.43671766342142,
+            "volatility": 23.9221140472879,
+            "value": 56.61971830985916,
+            "quality": 88.31710709318497,
+            "technical": 79.55493741307372,
+            "sentiment": 47.9,
+            "dividend": 16.481223922114047
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 76.43,
+            "entry_low": 61.14,
+            "entry_high": 68.79,
+            "target": 91.72,
+            "stop_loss": 56.25,
+            "signal": "AVOID_PEAK",
+            "upside_pct": 3.5,
+            "rr_ratio": 0.1,
+            "premium_pct": 15.9,
+            "estimates": {
+              "dcf": 76.43,
+              "graham": 119.51,
+              "ev_ebitda": 66.02,
+              "fcf_yield": 33.43,
+              "epv": 91.54
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 45.09,
+                "growth_rate": 10.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 96.5
+              },
+              "Base": {
+                "fair_value": 76.43,
+                "growth_rate": 20.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 15.9
+              },
+              "Bull": {
+                "fair_value": 93.89,
+                "growth_rate": 24.0,
+                "signal": "HOLD_WATCH",
+                "premium_pct": -5.6
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.71,
+            "sortino": 1.13,
+            "max_drawdown_pct": -63.8,
+            "var_95_pct": -18.1,
+            "roic_wacc": {
+              "roic": 6.4,
+              "wacc": 7.3,
+              "spread": -1.0,
+              "verdict": "NEUTRAL"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F7 RevGrow",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              80.0,
+              46.0,
+              78.6,
+              35.4,
+              52.5,
+              55.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "warn",
+              "pass",
+              "warn",
+              "warn",
+              "warn",
+              "pass"
+            ],
+            "pass_count": 3,
+            "warn_count": 4,
+            "fail_count": 0,
+            "overall_score": 60.4,
+            "conviction": "LOW"
+          }
+        },
+        {
+          "ticker": "AEM",
+          "price_entry": 217.86500549316406,
+          "composite_score": 97.50850926010925,
+          "sector": "Materials",
+          "factors": {
+            "momentum": 93.18497913769124,
+            "volatility": 58.97079276773296,
+            "value": 29.577464788732392,
+            "quality": 96.105702364395,
+            "technical": 78.72044506258693,
+            "sentiment": 57.0,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 169.01,
+            "entry_low": 135.21,
+            "entry_high": 152.11,
+            "target": 238.59,
+            "stop_loss": 124.39,
+            "signal": "AVOID_PEAK",
+            "upside_pct": 9.5,
+            "rr_ratio": 0.2,
+            "premium_pct": 28.9,
+            "estimates": {
+              "dcf": 308.56,
+              "graham": 99.32,
+              "ev_ebitda": 169.01,
+              "fcf_yield": 116.1,
+              "epv": 180.63
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 180.24,
+                "growth_rate": 10.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 20.9
+              },
+              "Base": {
+                "fair_value": 308.56,
+                "growth_rate": 20.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -29.4
+              },
+              "Bull": {
+                "fair_value": 380.32,
+                "growth_rate": 24.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -42.7
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.88,
+            "sortino": 1.29,
+            "max_drawdown_pct": -46.8,
+            "var_95_pct": -13.1,
+            "roic_wacc": {
+              "roic": 13.2,
+              "wacc": 7.4,
+              "spread": 5.8,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              89.4,
+              96.0,
+              66.8,
+              28.0,
+              70.8,
+              60.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "fail",
+              "pass",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 0,
+            "fail_count": 1,
+            "overall_score": 68.6,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "OHI",
+          "price_entry": 47.900001525878906,
+          "composite_score": 96.96612063187648,
+          "sector": "Real Estate",
+          "factors": {
+            "momentum": 71.7663421418637,
+            "volatility": 87.48261474269819,
+            "value": 67.74647887323944,
+            "quality": 89.98609179415855,
+            "technical": 83.72739916550765,
+            "sentiment": 52.14,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "BUY",
+          "valuation": {
+            "fair_value": 56.99,
+            "entry_low": 45.59,
+            "entry_high": 51.29,
+            "target": 68.39,
+            "stop_loss": 41.94,
+            "signal": "BUY",
+            "upside_pct": 42.8,
+            "rr_ratio": 3.4,
+            "premium_pct": -16.0,
+            "estimates": {
+              "dcf": 80.49,
+              "graham": 27.66,
+              "ev_ebitda": 57.89,
+              "fcf_yield": 36.04,
+              "epv": 56.99
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 57.26,
+                "growth_rate": 6.0,
+                "signal": "BUY",
+                "premium_pct": -16.3
+              },
+              "Base": {
+                "fair_value": 80.49,
+                "growth_rate": 12.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -40.5
+              },
+              "Bull": {
+                "fair_value": 92.01,
+                "growth_rate": 14.4,
+                "signal": "STRONG_BUY",
+                "premium_pct": -47.9
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.49,
+            "sortino": 0.73,
+            "max_drawdown_pct": -28.6,
+            "var_95_pct": -7.4,
+            "roic_wacc": {
+              "roic": 4.7,
+              "wacc": 3.5,
+              "spread": 1.2,
+              "verdict": "NEUTRAL"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F6 CR>1.5",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              75.3,
+              90.0,
+              66.8,
+              78.7,
+              37.5,
+              60.0,
+              78.5
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 1,
+            "fail_count": 0,
+            "overall_score": 72.3,
+            "conviction": "HIGH"
+          }
+        },
+        {
+          "ticker": "INSW",
+          "price_entry": 75.36990356445312,
+          "composite_score": 94.4997873131563,
+          "sector": "Energy",
+          "factors": {
+            "momentum": 93.7413073713491,
+            "volatility": 47.009735744089014,
+            "value": 34.647887323943664,
+            "quality": 94.71488178025035,
+            "technical": 71.00139082058415,
+            "sentiment": 53.87,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 58.88,
+            "entry_low": 47.1,
+            "entry_high": 52.99,
+            "target": 71.44,
+            "stop_loss": 43.34,
+            "signal": "AVOID_PEAK",
+            "upside_pct": -5.2,
+            "rr_ratio": -0.1,
+            "premium_pct": 28.0,
+            "estimates": {
+              "dcf": 12.46,
+              "graham": 63.55,
+              "ev_ebitda": 58.88,
+              "fcf_yield": 5.45,
+              "epv": 157.52
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 7.35,
+                "growth_rate": 10.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 925.3
+              },
+              "Base": {
+                "fair_value": 12.46,
+                "growth_rate": 20.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 504.9
+              },
+              "Bull": {
+                "fair_value": 15.31,
+                "growth_rate": 24.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 392.4
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 1.01,
+            "sortino": 1.62,
+            "max_drawdown_pct": -50.4,
+            "var_95_pct": -15.3,
+            "roic_wacc": {
+              "roic": 7.1,
+              "wacc": 2.1,
+              "spread": 5.0,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 7,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "STRONG"
+            }
+          },
+          "protocol": {
+            "gates": [
+              84.1,
+              84.0,
+              90.7,
+              19.4,
+              37.5,
+              65.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "fail",
+              "warn",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 5,
+            "warn_count": 1,
+            "fail_count": 1,
+            "overall_score": 64.6,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "GASS",
+          "price_entry": 9.895000457763672,
+          "composite_score": 94.2841996324402,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 89.4297635605007,
+            "volatility": 36.02225312934632,
+            "value": 87.74647887323944,
+            "quality": 75.10431154381085,
+            "technical": 71.00139082058415,
+            "sentiment": 55.9,
+            "dividend": 16.481223922114047
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 32.93,
+            "entry_low": 26.34,
+            "entry_high": 29.64,
+            "target": 39.52,
+            "stop_loss": 24.24,
+            "signal": "STRONG_BUY",
+            "upside_pct": 299.4,
+            "rr_ratio": null,
+            "premium_pct": -70.0,
+            "estimates": {
+              "graham": 26.88,
+              "ev_ebitda": 32.93,
+              "epv": 35.77
+            },
+            "sensitivity": {}
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.68,
+            "sortino": 1.02,
+            "max_drawdown_pct": -44.3,
+            "var_95_pct": -15.9,
+            "roic_wacc": {
+              "roic": 4.8,
+              "wacc": 5.2,
+              "spread": -0.4,
+              "verdict": "NEUTRAL"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F7 RevGrow",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              50.3,
+              69.0,
+              90.7,
+              85.4,
+              66.7,
+              60.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "warn",
+              "pass",
+              "pass",
+              "pass",
+              "pass",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 1,
+            "fail_count": 0,
+            "overall_score": 72.6,
+            "conviction": "HIGH"
+          }
+        },
+        {
+          "ticker": "GLPI",
+          "price_entry": 48.400001525878906,
+          "composite_score": 93.37547961222984,
+          "sector": "Real Estate",
+          "factors": {
+            "momentum": 47.98331015299026,
+            "volatility": 92.35048678720446,
+            "value": 77.74647887323944,
+            "quality": 92.35048678720446,
+            "technical": 97.91376912378304,
+            "sentiment": 53.8,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "BUY",
+          "valuation": {
+            "fair_value": 57.51,
+            "entry_low": 46.01,
+            "entry_high": 51.76,
+            "target": 69.01,
+            "stop_loss": 42.33,
+            "signal": "BUY",
+            "upside_pct": 42.6,
+            "rr_ratio": 3.4,
+            "premium_pct": -15.8,
+            "estimates": {
+              "dcf": 57.51,
+              "graham": 32.94,
+              "ev_ebitda": 79.1,
+              "fcf_yield": 25.75,
+              "epv": 77.79
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 40.91,
+                "growth_rate": 6.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 18.3
+              },
+              "Base": {
+                "fair_value": 57.51,
+                "growth_rate": 12.0,
+                "signal": "BUY",
+                "premium_pct": -15.8
+              },
+              "Bull": {
+                "fair_value": 65.75,
+                "growth_rate": 14.4,
+                "signal": "STRONG_BUY",
+                "premium_pct": -26.4
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.34,
+            "sortino": 0.53,
+            "max_drawdown_pct": -17.1,
+            "var_95_pct": -6.7,
+            "roic_wacc": {
+              "roic": 5.8,
+              "wacc": 2.6,
+              "spread": 3.2,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 5,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F6 CR>1.5",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F7 RevGrow",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              78.2,
+              90.0,
+              72.9,
+              81.4,
+              55.0,
+              60.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 1,
+            "fail_count": 0,
+            "overall_score": 76.6,
+            "conviction": "HIGH"
+          }
+        },
+        {
+          "ticker": "MU",
+          "price_entry": 366.4150085449219,
+          "composite_score": 90.39632780975673,
+          "sector": "Technology",
+          "factors": {
+            "momentum": 99.02642559109874,
+            "volatility": 17.385257301808068,
+            "value": 46.33802816901408,
+            "quality": 98.33101529902642,
+            "technical": 51.04311543810849,
+            "sentiment": 48.38,
+            "dividend": 33.79694019471488
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 93.2,
+            "entry_low": 74.56,
+            "entry_high": 83.88,
+            "target": 388.97,
+            "stop_loss": 68.59,
+            "signal": "AVOID_PEAK",
+            "upside_pct": 6.2,
+            "rr_ratio": 0.1,
+            "premium_pct": 293.2,
+            "estimates": {
+              "dcf": 46.96,
+              "ev_ebitda": 432.67,
+              "fcf_yield": 5.53,
+              "epv": 139.43
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 15.5,
+                "growth_rate": 22.5,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 2264.5
+              },
+              "Base": {
+                "fair_value": 46.96,
+                "growth_rate": 45.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 680.3
+              },
+              "Bull": {
+                "fair_value": 70.91,
+                "growth_rate": 54.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 416.7
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.75,
+            "sortino": 1.14,
+            "max_drawdown_pct": -57.6,
+            "var_95_pct": -16.6,
+            "roic_wacc": {
+              "roic": 10.9,
+              "wacc": 11.0,
+              "spread": -0.1,
+              "verdict": "NEUTRAL"
+            },
+            "piotroski": {
+              "score": 7,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "STRONG"
+            }
+          },
+          "protocol": {
+            "gates": [
+              94.1,
+              86.0,
+              87.5,
+              29.6,
+              67.5,
+              60.0,
+              67.7
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "fail",
+              "pass",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 0,
+            "fail_count": 1,
+            "overall_score": 69.7,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "HWM",
+          "price_entry": 247.0157928466797,
+          "composite_score": 90.1890017514478,
+          "sector": "Industrials",
+          "factors": {
+            "momentum": 92.21140472878999,
+            "volatility": 45.06258692628651,
+            "value": 4.225352112676056,
+            "quality": 99.16550764951322,
+            "technical": 88.87343532684284,
+            "sentiment": 60.31,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 68.62,
+            "entry_low": 54.9,
+            "entry_high": 61.76,
+            "target": 264.33,
+            "stop_loss": 50.5,
+            "signal": "AVOID_PEAK",
+            "upside_pct": 7.0,
+            "rr_ratio": 0.1,
+            "premium_pct": 260.0,
+            "estimates": {
+              "dcf": 83.2,
+              "graham": 33.31,
+              "ev_ebitda": 77.22,
+              "fcf_yield": 32.07,
+              "epv": 68.62
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 50.9,
+                "growth_rate": 9.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 385.3
+              },
+              "Base": {
+                "fair_value": 83.2,
+                "growth_rate": 18.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 196.9
+              },
+              "Bull": {
+                "fair_value": 100.76,
+                "growth_rate": 21.6,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 145.2
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 1.38,
+            "sortino": 2.13,
+            "max_drawdown_pct": -23.2,
+            "var_95_pct": -7.3,
+            "roic_wacc": {
+              "roic": 12.1,
+              "wacc": 6.3,
+              "spread": 5.8,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 7,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "STRONG"
+            }
+          },
+          "protocol": {
+            "gates": [
+              87.6,
+              70.0,
+              72.1,
+              16.7,
+              44.2,
+              65.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "fail",
+              "warn",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 5,
+            "warn_count": 1,
+            "fail_count": 1,
+            "overall_score": 60.4,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "SENEB",
+          "price_entry": 139.41000366210938,
+          "composite_score": 90.18388488847512,
+          "sector": "Consumer",
+          "factors": {
+            "momentum": 82.89290681502086,
+            "volatility": 63.282336578581365,
+            "value": 85.63380281690141,
+            "quality": 68.2892906815021,
+            "technical": 56.6759388038943,
+            "sentiment": 48.4,
+            "dividend": 16.481223922114047
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 1842.64,
+            "entry_low": 1474.11,
+            "entry_high": 1658.38,
+            "target": 2211.17,
+            "stop_loss": 1356.18,
+            "signal": "STRONG_BUY",
+            "upside_pct": 1486.1,
+            "rr_ratio": null,
+            "premium_pct": -92.4,
+            "estimates": {
+              "dcf": 3758.44,
+              "ev_ebitda": 1631.79,
+              "fcf_yield": 1365.61,
+              "epv": 2053.49
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 1971.19,
+                "growth_rate": 12.5,
+                "signal": "STRONG_BUY",
+                "premium_pct": -92.9
+              },
+              "Base": {
+                "fair_value": 3758.44,
+                "growth_rate": 25.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -96.3
+              },
+              "Bull": {
+                "fair_value": 4825.22,
+                "growth_rate": 30.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -97.1
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.52,
+            "sortino": 0.4,
+            "max_drawdown_pct": -53.4,
+            "var_95_pct": -14.6,
+            "roic_wacc": {
+              "roic": 6.7,
+              "wacc": 1.6,
+              "spread": 5.1,
+              "verdict": "POSITIVE"
+            },
+            "piotroski": {
+              "score": 5,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F6 CR>1.5"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F7 RevGrow",
+                "F8 GM>25%",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              59.1,
+              29.0,
+              75.4,
+              96.0,
+              72.0,
+              50.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "warn",
+              "fail",
+              "pass",
+              "pass",
+              "pass",
+              "warn",
+              "pass"
+            ],
+            "pass_count": 4,
+            "warn_count": 2,
+            "fail_count": 1,
+            "overall_score": 68.1,
+            "conviction": "MEDIUM"
+          }
+        },
+        {
+          "ticker": "ALSN",
+          "price_entry": 113.25499725341797,
+          "composite_score": 89.69856979118806,
+          "sector": "Consumer",
+          "factors": {
+            "momentum": 78.72044506258693,
+            "volatility": 61.75243393602226,
+            "value": 73.52112676056338,
+            "quality": 75.38247566063978,
+            "technical": 57.44089012517385,
+            "sentiment": 48.94,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "STRONG_BUY",
+          "valuation": {
+            "fair_value": 157.58,
+            "entry_low": 126.07,
+            "entry_high": 141.83,
+            "target": 189.1,
+            "stop_loss": 115.98,
+            "signal": "STRONG_BUY",
+            "upside_pct": 67.0,
+            "rr_ratio": null,
+            "premium_pct": -28.1,
+            "estimates": {
+              "dcf": 251.71,
+              "ev_ebitda": 202.1,
+              "fcf_yield": 79.01,
+              "epv": 113.07
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 130.55,
+                "growth_rate": 12.5,
+                "signal": "BUY",
+                "premium_pct": -13.2
+              },
+              "Base": {
+                "fair_value": 251.71,
+                "growth_rate": 25.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -55.0
+              },
+              "Bull": {
+                "fair_value": 324.29,
+                "growth_rate": 30.0,
+                "signal": "STRONG_BUY",
+                "premium_pct": -65.1
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.76,
+            "sortino": 1.09,
+            "max_drawdown_pct": -33.6,
+            "var_95_pct": -10.4,
+            "roic_wacc": {
+              "roic": 10.0,
+              "wacc": 9.4,
+              "spread": 0.7,
+              "verdict": "NEUTRAL"
+            },
+            "piotroski": {
+              "score": 6,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F5 LowDebt",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              94.1,
+              74.0,
+              56.8,
+              92.4,
+              67.5,
+              60.0,
+              83.1
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "warn",
+              "pass",
+              "pass",
+              "pass",
+              "pass"
+            ],
+            "pass_count": 6,
+            "warn_count": 1,
+            "fail_count": 0,
+            "overall_score": 78.6,
+            "conviction": "HIGH"
+          }
+        },
+        {
+          "ticker": "GUT",
+          "price_entry": 6.04010009765625,
+          "composite_score": 89.03964937786056,
+          "sector": "Financials",
+          "factors": {
+            "momentum": 55.493741307371344,
+            "volatility": 91.51599443671766,
+            "value": 84.22535211267605,
+            "quality": 81.08484005563282,
+            "technical": 74.40890125173853,
+            "sentiment": 48.4,
+            "dividend": 67.0375521557719
+          },
+          "valuation_signal": "AVOID_PEAK",
+          "valuation": {
+            "fair_value": 0.96,
+            "entry_low": 0.77,
+            "entry_high": 0.87,
+            "target": 1.16,
+            "stop_loss": 0.71,
+            "signal": "AVOID_PEAK",
+            "upside_pct": -80.8,
+            "rr_ratio": -0.9,
+            "premium_pct": 525.9,
+            "estimates": {
+              "dcf": 1.13,
+              "graham": 6.79,
+              "fcf_yield": 0.63,
+              "epv": 0.8
+            },
+            "sensitivity": {
+              "Bear": {
+                "fair_value": 0.71,
+                "growth_rate": 9.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 752.2
+              },
+              "Base": {
+                "fair_value": 1.13,
+                "growth_rate": 18.0,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 433.6
+              },
+              "Bull": {
+                "fair_value": 1.36,
+                "growth_rate": 21.6,
+                "signal": "AVOID_PEAK",
+                "premium_pct": 344.1
+              }
+            }
+          },
+          "risk": {
+            "altman_z": {
+              "score": null,
+              "zone": "UNKNOWN"
+            },
+            "sharpe": 0.15,
+            "sortino": 0.18,
+            "max_drawdown_pct": -33.9,
+            "var_95_pct": -9.9,
+            "roic_wacc": {
+              "roic": 1.3,
+              "wacc": 7.4,
+              "spread": -6.1,
+              "verdict": "DESTROYING VALUE"
+            },
+            "piotroski": {
+              "score": 5,
+              "out_of": 9,
+              "passed": [
+                "F1 ROA>0",
+                "F2 OCF>0",
+                "F3 EPS\u2191",
+                "F5 LowDebt",
+                "F8 GM>25%"
+              ],
+              "failed": [
+                "F4 Accruals",
+                "F6 CR>1.5",
+                "F7 RevGrow",
+                "F9 ATO>0.5"
+              ],
+              "interpretation": "MODERATE"
+            }
+          },
+          "protocol": {
+            "gates": [
+              72.9,
+              79.0,
+              79.3,
+              34.3,
+              30.0,
+              50.0,
+              64.6
+            ],
+            "gate_statuses": [
+              "pass",
+              "pass",
+              "pass",
+              "fail",
+              "fail",
+              "warn",
+              "pass"
+            ],
+            "pass_count": 4,
+            "warn_count": 1,
+            "fail_count": 2,
+            "overall_score": 59.3,
+            "conviction": "MEDIUM"
+          }
+        }
+      ]
     }
   ],
   "sector_factor_corr": {},

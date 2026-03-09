@@ -21,7 +21,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from config import SECTOR_ERP
+from config import SECTOR_ERP, VALUATION_CONFIG, SECTOR_GROWTH_CAP
 
 # Typical sector EV/EBITDA medians (updated periodically)
 SECTOR_EV_EBITDA = {
@@ -56,7 +56,7 @@ class ValuationEngine:
 
     def __init__(self, rf_rate: float = 0.045):
         self.rf_rate       = rf_rate
-        self.discount_rate = rf_rate + 0.055   # fallback; _get_discount_rate() is sector-aware
+        self.discount_rate = rf_rate + VALUATION_CONFIG["fallback_discount_offset"]
 
     # ── Dynamic discount rate (sector ERP + size premium) ─────────────────────
     def _get_discount_rate(self, info: dict, sector: str) -> float:
@@ -99,9 +99,15 @@ class ValuationEngine:
         if dcf and dcf > 0:
             estimates["dcf"] = dcf
 
-        gn = self._graham_number(info)
-        if gn and gn > 0:
-            estimates["graham"] = gn
+        # Graham Number: only meaningful for asset-heavy sectors (not tech/SaaS/biotech)
+        _GRAHAM_SECTORS = {
+            "Financials", "Financial Services", "Industrials", "Consumer Defensive",
+            "Consumer Cyclical", "Energy", "Materials", "Utilities", "Real Estate",
+        }
+        if sector in _GRAHAM_SECTORS:
+            gn = self._graham_number(info)
+            if gn and gn > 0:
+                estimates["graham"] = gn
 
         ev = self._ev_ebitda_target(info, sector)
         if ev and ev > 0:
@@ -133,16 +139,16 @@ class ValuationEngine:
             }
 
         fair_value = statistics.median(list(estimates.values()))
-        entry_low  = fair_value * 0.80   # 20% MoS
-        entry_high = fair_value * 0.90   # 10% MoS
-        target     = fair_value * 1.20   # 20% above fair value as base target
+        entry_low  = fair_value * (1 - VALUATION_CONFIG["margin_of_safety_low"])
+        entry_high = fair_value * (1 - VALUATION_CONFIG["margin_of_safety_high"])
+        target     = fair_value * (1 + VALUATION_CONFIG["price_target_upside"])
 
         # Use analyst target if it's more bullish than our estimate
         analyst_tgt = info.get("targetMeanPrice")
         if analyst_tgt and float(analyst_tgt) > target:
             target = float(analyst_tgt) * 0.95   # 5% haircut on consensus optimism
 
-        stop_loss  = entry_low * 0.92           # 8% below entry
+        stop_loss  = entry_low * (1 - VALUATION_CONFIG["stop_loss_pct"])
         premium    = (current - fair_value) / fair_value
 
         upside     = (target - current) / current
@@ -201,10 +207,11 @@ class ValuationEngine:
 
         fcf_ps = fcf / shares
 
-        # Growth rate: blend revenue + earnings growth, cap at 25%, floor at -3%
-        rev_g  = float(info.get("revenueGrowth")  or 0)
-        earn_g = float(info.get("earningsGrowth") or 0)
-        g1     = min(0.25, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
+        # Growth rate: blend revenue + earnings growth, sector-aware cap, floor at -3%
+        rev_g      = float(info.get("revenueGrowth")  or 0)
+        earn_g     = float(info.get("earningsGrowth") or 0)
+        _gcap      = SECTOR_GROWTH_CAP.get(sector, 0.25)
+        g1         = min(_gcap, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
 
         # Accruals quality adjustment on growth rate
         ni  = info.get("netIncomeToCommon") or info.get("netIncome")
@@ -216,9 +223,9 @@ class ValuationEngine:
                 g1 *= 1.08
             elif accruals > 0.05:
                 g1 *= 0.92
-            g1 = min(0.25, max(-0.03, g1))
+            g1 = min(_gcap, max(-0.03, g1))
 
-        tg = 0.025   # Stage 3 terminal: conservative GDP-level growth
+        tg = VALUATION_CONFIG["terminal_growth_rate"]
         dr = self._get_discount_rate(info, sector)
 
         # Stage 1: years 1–5 at g1
@@ -305,7 +312,7 @@ class ValuationEngine:
         if fcf <= 0 or shares <= 0:
             return None
         fcf_ps       = fcf / shares
-        target_yield = self.rf_rate + 0.030   # dynamic: rises with rf_rate
+        target_yield = self.rf_rate + VALUATION_CONFIG["fcf_yield_premium"]
         return round(fcf_ps / target_yield, 2)
 
     # ── Method 5: Earnings Power Value (Greenwald) ────────────────────────────
@@ -398,19 +405,20 @@ class ValuationEngine:
         fcf_ps = fcf / shares
         rev_g  = float(info.get("revenueGrowth")  or 0)
         earn_g = float(info.get("earningsGrowth") or 0)
-        base_g = min(0.25, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
+        _gcap  = SECTOR_GROWTH_CAP.get(sector, 0.25)
+        base_g = min(_gcap, max(-0.03, rev_g * 0.40 + earn_g * 0.60))
         cur    = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
         dr     = self._get_discount_rate(info, sector)
 
         scenarios = {
             "Bear": max(-0.03, base_g * 0.50),
             "Base": base_g,
-            "Bull": min(0.30,  base_g * 1.50),
+            "Bull": min(_gcap * 1.2, base_g * 1.50),
         }
 
         results = {}
         for name, g in scenarios.items():
-            tg    = 0.025   # GDP terminal
+            tg    = VALUATION_CONFIG["terminal_growth_rate"]
             dr_sc = dr
 
             # Stage 1: years 1-5
@@ -476,7 +484,7 @@ class ValuationEngine:
 
         fcf_ps = fcf / shares
         dr     = self._get_discount_rate(info, sector)
-        tg     = 0.025   # terminal growth (same as _dcf Stage 3)
+        tg     = VALUATION_CONFIG["terminal_growth_rate"]
 
         def _price_at_g(g: float) -> float:
             """3-stage DCF price given growth rate g."""

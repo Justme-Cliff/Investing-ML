@@ -23,7 +23,7 @@ Conviction:
 import statistics
 from typing import Dict, List, Optional
 
-from config import SECTOR_MEDIAN_PE
+from config import SECTOR_MEDIAN_PE, PROTOCOL_CONFIG
 from advisor.risk import RiskEngine
 
 
@@ -39,10 +39,10 @@ GATE_NAMES = [
 
 GATE_SHORT = ["Quality", "Moat", "Health", "Value", "Entry", "News", "Trend"]
 
-GATE_WEIGHTS = [0.20, 0.15, 0.15, 0.22, 0.10, 0.08, 0.10]   # must sum to 1.0
+GATE_WEIGHTS = PROTOCOL_CONFIG["gate_weights"]
 
-PASS_THRESHOLD = 60
-WARN_THRESHOLD = 35
+PASS_THRESHOLD = PROTOCOL_CONFIG["pass_threshold"]
+WARN_THRESHOLD = PROTOCOL_CONFIG["warn_threshold"]
 
 # Mapping from ValuationEngine signal → Gate 4 score
 _SIGNAL_TO_GATE4 = {
@@ -80,11 +80,12 @@ class ProtocolAnalyzer:
         close   = history["Close"].dropna()
         sector  = data["sector"]
 
+        gate4_score, gate4_detail = self._gate_valuation(info, sector, valuation)
         gate_scores = [
             self._gate_quality(info),
             self._gate_moat(info),
             self._gate_health(info),
-            self._gate_valuation(info, sector, valuation),
+            gate4_score,
             self._gate_entry(info, close),
             self._gate_news(data, row),
             self._gate_trend(close),
@@ -126,6 +127,7 @@ class ProtocolAnalyzer:
             "overall_score":  round(overall, 1),
             "conviction":     conviction,
             "entry_analysis": entry,
+            "gate4_detail":   gate4_detail,
         }
 
     # ── Gate 1: Business Quality ──────────────────────────────────────────────
@@ -242,17 +244,27 @@ class ProtocolAnalyzer:
 
     # ── Gate 4: Valuation (uses ValuationEngine signal if available) ──────────
     def _gate_valuation(self, info: dict, sector: str,
-                        valuation: dict = None) -> float:
-        # If ValuationEngine computed a signal, use it (much more rigorous)
+                        valuation: dict = None) -> tuple:
+        """Returns (score, detail_dict) where detail_dict includes disagreement info."""
+        traditional = self._gate_valuation_traditional(info, sector)
         if valuation:
-            sig = valuation.get("signal")
-            gate4 = _SIGNAL_TO_GATE4.get(sig)
-            if gate4 is not None:
-                # Blend with traditional metrics for robustness
-                traditional = self._gate_valuation_traditional(info, sector)
-                return gate4 * 0.65 + traditional * 0.35
-
-        return self._gate_valuation_traditional(info, sector)
+            sig    = valuation.get("signal")
+            gate4v = _SIGNAL_TO_GATE4.get(sig)
+            if gate4v is not None:
+                blended      = gate4v * 0.65 + traditional * 0.35
+                disagreement = abs(gate4v - traditional) > 30
+                return blended, {
+                    "ve_signal":         sig,
+                    "ve_score":          gate4v,
+                    "traditional_score": round(traditional, 1),
+                    "blended":           round(blended, 1),
+                    "disagreement":      disagreement,
+                }
+        return traditional, {
+            "ve_signal":         None,
+            "traditional_score": round(traditional, 1),
+            "disagreement":      False,
+        }
 
     def _gate_valuation_traditional(self, info: dict, sector: str) -> float:
         s, w = [], []
@@ -293,8 +305,18 @@ class ProtocolAnalyzer:
         if h52 and len(close) > 0:
             cur = float(close.iloc[-1])
             h   = float(h52)
-            pct = (h - cur) / h    # fraction below 52-week high
-            s.append(90 if pct > 0.20 else 70 if pct > 0.10 else 45 if pct > 0.05 else 10)
+            pct = (h - cur) / h    # fraction below 52-week high (negative = ATH breakout)
+            if pct <= 0:
+                # At or above 52W high — momentum breakout (George & Hwang 2004)
+                s.append(72)
+            elif pct > 0.20:
+                s.append(90)       # deep pullback — ideal entry
+            elif pct > 0.10:
+                s.append(70)
+            elif pct > 0.05:
+                s.append(45)
+            else:
+                s.append(30)       # near ATH — slightly elevated resistance
             w.append(3.0)          # biggest weight in this gate
 
         tgt = info.get("targetMeanPrice")

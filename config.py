@@ -3,6 +3,8 @@
 import os
 from dotenv import load_dotenv
 
+VERSION = "7.1.0"   # Major.Minor.Patch — bump on each release
+
 # Load .env from the project root (silently ignored if the file doesn't exist)
 load_dotenv()
 
@@ -27,6 +29,7 @@ DYNAMIC_UNIVERSE        = True
 UNIVERSE_MIN_MARKET_CAP = 100_000_000   # $100 M — filters out micro-cap noise
 UNIVERSE_MAX_TICKERS    = 800           # stocks scored per run (expanded for international coverage)
 PORTFOLIO_N             = 15            # final portfolio size (15 = better diversification vs 10)
+FRESH_PICKS_PENALTY     = 22.0          # points subtracted from composite_score in fresh picks mode
 
 # ── Sector equity risk premiums (% — added to rf_rate for sector-specific WACC/DCF) ─
 SECTOR_ERP = {
@@ -339,3 +342,138 @@ NEGATIVE_WORDS = {
     "deteriorating", "revenue miss", "earnings miss", "negative outlook",
     "credit risk", "debt burden", "cost inflation",
 }
+
+# ── Sector DCF growth caps (max allowed long-term growth rate per sector) ─────
+SECTOR_GROWTH_CAP = {
+    "Technology":             0.45,
+    "Healthcare":             0.35,
+    "Consumer Cyclical":      0.20,
+    "Consumer Defensive":     0.15,
+    "Financials":             0.18,
+    "Financial Services":     0.18,
+    "Energy":                 0.20,
+    "Industrials":            0.18,
+    "Utilities":              0.10,
+    "Real Estate":            0.12,
+    "Materials":              0.20,
+    "Communication Services": 0.30,
+    "Unknown":                0.25,
+}
+
+# ── Valuation engine configuration ───────────────────────────────────────────
+VALUATION_CONFIG = {
+    "margin_of_safety_low":  0.20,   # entry_low  = FV × (1 - this)
+    "margin_of_safety_high": 0.10,   # entry_high = FV × (1 - this)
+    "price_target_upside":   0.20,   # target     = FV × (1 + this)
+    "stop_loss_pct":         0.08,   # stop       = entry_low × (1 - this)
+    "terminal_growth_rate":  0.025,
+    "fcf_yield_premium":     0.030,
+    "fallback_discount_offset": 0.055,
+}
+
+# ── Protocol gate configuration ───────────────────────────────────────────────
+PROTOCOL_CONFIG = {
+    "gate_weights":    [0.20, 0.15, 0.15, 0.22, 0.10, 0.08, 0.10],
+    "pass_threshold":  60,
+    "warn_threshold":  35,
+}
+
+# ── Pipeline / scoring configuration ─────────────────────────────────────────
+PIPELINE_CONFIG = {
+    "candidate_pool":               30,
+    "position_cap":                 0.15,
+    "beta_targets":                 {1: 0.90, 2: 1.05, 3: 1.30, 4: 1.60},
+    "earnings_proximity_penalty":   {1: 4.0, 2: 2.5, 3: 1.0, 4: 0.0},
+    "garp_bonus_max":               15.0,
+    "vq_bonus_max":                 10.0,
+    "crowding_corr_threshold":      0.92,
+    "continuity_bonus":             3.0,
+    "engine_timeout":               120,
+    "per_ticker_timeout":           30,
+    "total_fetch_timeout":          600,
+    "pattern_ttl_days":             365,
+}
+
+# ── Learner / adaptive weights configuration ──────────────────────────────────
+LEARNER_CONFIG = {
+    "min_lr":              0.04,
+    "max_lr":              0.14,
+    "min_weight":          0.02,
+    "max_pattern_bonus":   12.0,
+    "max_pattern_penalty": 6.0,
+    "winner_threshold":    0.75,
+    "loser_threshold":     0.25,
+    "max_patterns":        300,
+    "lr_decay_sessions":   20,
+}
+
+
+def check_api_keys() -> dict:
+    """Test each configured optional API key with a lightweight request.
+    Returns {service_name: bool} — True = key valid, False = failed/missing."""
+    import requests as _req
+
+    status: dict = {}
+
+    if FINNHUB_KEY:
+        try:
+            r = _req.get(
+                f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={FINNHUB_KEY}",
+                timeout=6,
+            )
+            status["FINNHUB"] = r.status_code == 200 and "c" in r.json()
+        except Exception:
+            status["FINNHUB"] = False
+    else:
+        status["FINNHUB"] = None   # not configured
+
+    if FRED_KEY:
+        try:
+            r = _req.get(
+                f"https://api.stlouisfed.org/fred/series?series_id=GDP&api_key={FRED_KEY}&file_type=json",
+                timeout=6,
+            )
+            status["FRED"] = r.status_code == 200
+        except Exception:
+            status["FRED"] = False
+    else:
+        status["FRED"] = None
+
+    if ALPHAVANTAGE_KEY:
+        try:
+            r = _req.get(
+                f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=AAPL&apikey={ALPHAVANTAGE_KEY}",
+                timeout=6,
+            )
+            status["ALPHAVANTAGE"] = "Global Quote" in r.text and "05. price" in r.text
+        except Exception:
+            status["ALPHAVANTAGE"] = False
+    else:
+        status["ALPHAVANTAGE"] = None
+
+    if FMP_KEY:
+        try:
+            r = _req.get(
+                f"https://financialmodelingprep.com/api/v3/profile/AAPL?apikey={FMP_KEY}",
+                timeout=6,
+            )
+            data = r.json()
+            status["FMP"] = isinstance(data, list) and len(data) > 0
+        except Exception:
+            status["FMP"] = False
+    else:
+        status["FMP"] = None
+
+    if NEWSAPI_KEY:
+        try:
+            r = _req.get(
+                f"https://newsapi.org/v2/everything?q=AAPL&pageSize=1&apiKey={NEWSAPI_KEY}",
+                timeout=6,
+            )
+            status["NEWSAPI"] = r.status_code == 200 and r.json().get("status") == "ok"
+        except Exception:
+            status["NEWSAPI"] = False
+    else:
+        status["NEWSAPI"] = None
+
+    return status

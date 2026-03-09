@@ -46,17 +46,18 @@ class RiskEngine:
             results[t] = self.analyze(
                 t, data["info"], data["history"], rf_rate,
                 sector=sector, nearest_iv=nearest_iv, iv_rank_pre=iv_rank_pre,
+                raw_data=data,
             )
         return results
 
     def analyze(self, ticker: str, info: dict,
                 history: pd.DataFrame, rf_rate: float = 0.045,
                 sector: str = "Unknown", nearest_iv: Optional[float] = None,
-                iv_rank_pre: Optional[float] = None) -> dict:
+                iv_rank_pre: Optional[float] = None,
+                raw_data: dict = None) -> dict:
         close   = history["Close"].dropna()
         iv_rank = iv_rank_pre if iv_rank_pre is not None else self._compute_iv_rank(close, nearest_iv)
-        # Get raw_data from universe_data context if needed (passed as optional)
-        _raw = {}
+        _raw = raw_data or {}
         return {
             "ticker":            ticker,
             "altman_z":          self.altman_z(info),
@@ -70,7 +71,7 @@ class RiskEngine:
             "accruals":          self.accruals_ratio(info),
             "gross_prof":        self.gross_profitability(info),
             "piotroski":         self.piotroski_9pt(info),
-            "beneish":           self.beneish_m_score(info, _raw),
+            "beneish":           self.beneish_m_score(info, _raw or {}),
             "iv_rank":           iv_rank,
         }
 
@@ -255,13 +256,12 @@ class RiskEngine:
         aqi = 1.0 + max(0.0, float(asset_growth) - 0.05)  # penalise aggressive asset inflation
 
         # DEPI — depreciation index (proxy: capex intensity change)
-        # Higher DEPI > 1 = depreciation slowing relative to PP&E (inflating earnings)
-        # Without prior year data, use neutral mean
-        depi = 1.0   # Beneish sample mean; cannot compute without prior year D&A
+        # Cannot compute without prior-year D&A data; omitted from partial model
+        depi = None   # prior-year D&A unavailable from yfinance
 
         # DSRI — days sales receivable index
-        # Without prior year receivables, use neutral mean
-        dsri = 1.031   # Beneish non-manipulator average
+        # Cannot compute without prior-year receivables; omitted from partial model
+        dsri = None   # prior-year receivables unavailable from yfinance
 
         # SGAI — SG&A index
         # Without prior year SG&A, proxy via margin spread
@@ -283,16 +283,31 @@ class RiskEngine:
         else:
             lvgi = 1.0   # neutral
 
-        # ── M-Score formula ────────────────────────────────────────────────────
-        m = (-4.84
-             + 0.920 * dsri
-             + 0.528 * gmi
-             + 0.404 * aqi
-             + 0.892 * sgi
-             + 0.115 * depi
-             - 0.172 * sgai
-             + 4.679 * tata
-             - 0.327 * lvgi)
+        # ── M-Score formula (partial 6-variable model when dsri/depi unavailable) ──
+        # Full 8-variable Beneish: M = -4.84 + 0.920×DSRI + 0.528×GMI + 0.404×AQI
+        #                              + 0.892×SGI + 0.115×DEPI - 0.172×SGAI
+        #                              + 4.679×TATA - 0.327×LVGI
+        # Partial model omits DSRI and DEPI terms (prior-year data unavailable),
+        # adjusts intercept to -4.27 to preserve roughly correct scale.
+        partial_model = dsri is None or depi is None
+        if partial_model:
+            m = (-4.27
+                 + 0.528 * gmi
+                 + 0.404 * aqi
+                 + 0.892 * sgi
+                 - 0.172 * sgai
+                 + 4.679 * tata
+                 - 0.327 * lvgi)
+        else:
+            m = (-4.84
+                 + 0.920 * dsri
+                 + 0.528 * gmi
+                 + 0.404 * aqi
+                 + 0.892 * sgi
+                 + 0.115 * depi
+                 - 0.172 * sgai
+                 + 4.679 * tata
+                 - 0.327 * lvgi)
 
         manipulator = m > -1.78
 
@@ -306,10 +321,11 @@ class RiskEngine:
             risk_label = "VERY CLEAN"
 
         return {
-            "m_score":     round(m, 3),
-            "manipulator": manipulator,
-            "risk_label":  risk_label,
-            "components":  {
+            "m_score":      round(m, 3),
+            "manipulator":  manipulator,
+            "risk_label":   risk_label,
+            "partial_model": partial_model,
+            "components":   {
                 "TATA": round(tata, 4),
                 "SGI":  round(sgi,  3),
                 "GMI":  round(gmi,  3),
@@ -733,3 +749,10 @@ class RiskEngine:
             "failed":         failed,
             "interpretation": interp,
         }
+
+    @staticmethod
+    def piotroski_score(info: dict) -> float:
+        """Return Piotroski F-Score normalized to 0-100. Convenience wrapper for fetcher."""
+        result = RiskEngine().piotroski_9pt(info)
+        score  = result.get("score", 0) if isinstance(result, dict) else 0
+        return float(score) / 9.0 * 100.0

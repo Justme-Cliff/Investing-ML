@@ -32,7 +32,7 @@ import warnings
 import numpy as np
 import yfinance as yf
 
-from config import WEIGHT_MATRIX, FACTOR_NAMES
+from config import WEIGHT_MATRIX, FACTOR_NAMES, LEARNER_CONFIG, PIPELINE_CONFIG
 
 warnings.filterwarnings("ignore")
 
@@ -40,15 +40,15 @@ MEMORY_DIR  = "memory"
 MEMORY_FILE = os.path.join(MEMORY_DIR, "history.json")
 SCHEMA_VER  = 2
 
-# ── Learning hyperparameters ───────────────────────────────────────────────────
-MIN_LR            = 0.04    # learning rate floor — starts here
-MAX_LR            = 0.14    # learning rate ceiling — approached as data grows
-MIN_WEIGHT        = 0.02    # no factor weight can drop below 2%
-MAX_PATTERN_BONUS = 12.0    # max points added from pattern-match similarity
-MAX_PATTERN_PENALTY = 6.0   # max points removed for loser-pattern similarity
-WINNER_THRESHOLD  = 0.75    # top 25% of returns = "winner" pattern stored
-LOSER_THRESHOLD   = 0.25    # bottom 25% of returns = "loser" pattern stored
-MAX_PATTERNS      = 300     # cap on stored patterns (oldest pruned first)
+# ── Learning hyperparameters (sourced from config.LEARNER_CONFIG) ─────────────
+MIN_LR            = LEARNER_CONFIG["min_lr"]
+MAX_LR            = LEARNER_CONFIG["max_lr"]
+MIN_WEIGHT        = LEARNER_CONFIG["min_weight"]
+MAX_PATTERN_BONUS = LEARNER_CONFIG["max_pattern_bonus"]
+MAX_PATTERN_PENALTY = LEARNER_CONFIG["max_pattern_penalty"]
+WINNER_THRESHOLD  = LEARNER_CONFIG["winner_threshold"]
+LOSER_THRESHOLD   = LEARNER_CONFIG["loser_threshold"]
+MAX_PATTERNS      = LEARNER_CONFIG["max_patterns"]
 
 # ── Graveyard archetypes — survivorship bias mitigation ─────────────────────
 # Pre-seeded loser fingerprints based on documented financial distress patterns.
@@ -106,8 +106,11 @@ def _cosine_sim(a: List[float], b: List[float]) -> float:
 
 
 def _adaptive_lr(n_sessions: int) -> float:
-    """Learning rate grows with accumulated data (sqrt schedule), bounded."""
-    return min(MAX_LR, MIN_LR * math.sqrt(max(1, n_sessions)))
+    """Smooth exponential growth: rises fast early, plateaus near MAX_LR.
+    Avoids the sqrt schedule's early ceiling (hits MAX_LR after only ~13 sessions).
+    At 1 session → ~4.5%, 5 sessions → ~6.5%, 20 sessions → ~10.2%, 50+ → ~14%."""
+    decay = LEARNER_CONFIG.get("lr_decay_sessions", 20)
+    return MIN_LR + (MAX_LR - MIN_LR) * (1.0 - math.exp(-n_sessions / decay))
 
 
 class SessionMemory:
@@ -472,10 +475,24 @@ class SessionMemory:
             except Exception:
                 pass
 
+    def _prune_stale_patterns(self, max_age_days: int = None):
+        """Remove patterns older than max_age_days. Graveyard archetypes are exempt."""
+        if max_age_days is None:
+            max_age_days = PIPELINE_CONFIG.get("pattern_ttl_days", 365)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        for key in ("winner_patterns", "loser_patterns"):
+            patterns = self._data.get(key, [])
+            self._data[key] = [
+                p for p in patterns
+                if p.get("source") == "graveyard" or p.get("ts", "9999") >= cutoff
+            ]
+
     def _update_winner_loser_patterns(self, picks: List[dict], regime: str):
         """Layer 4 — store factor fingerprints of best and worst performers."""
         if len(picks) < 4:
             return
+        # Prune stale patterns before adding new ones
+        self._prune_stale_patterns()
         returns  = [p["return"] for p in picks]
         high_cut = float(np.percentile(returns, 100 * WINNER_THRESHOLD))
         low_cut  = float(np.percentile(returns, 100 * LOSER_THRESHOLD))
@@ -491,6 +508,7 @@ class SessionMemory:
                 "regime": regime,
                 "r":      p["return"],
                 "alpha":  p.get("alpha") or 0.0,
+                "ts":     datetime.now(timezone.utc).isoformat(),
             }
             if p["return"] >= high_cut:
                 winners.append(pat)

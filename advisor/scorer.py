@@ -24,6 +24,7 @@ from config import (
     HORIZON_LABELS,
 )
 from advisor.collector import UserProfile
+from advisor.utils import is_imminent_earnings, analyst_score as _analyst_score_util
 
 
 class MultiFactorScorer:
@@ -224,9 +225,7 @@ class MultiFactorScorer:
             _earn_penalty = {1: 4.0, 2: 2.5, 3: 1.0, 4: 0.0}
             _ep = _earn_penalty.get(self.profile.risk_level, 2.0)
             if _ep > 0:
-                _imminent = df["earnings_days_away"].apply(
-                    lambda x: x is not None and not (isinstance(x, float) and __import__('math').isnan(x)) and 0 <= int(x) <= 7
-                )
+                _imminent = df["earnings_days_away"].apply(is_imminent_earnings)
                 if _imminent.any():
                     df.loc[_imminent, "composite_score"] = (
                         df.loc[_imminent, "composite_score"] - _ep
@@ -530,15 +529,7 @@ class MultiFactorScorer:
         insider_score = float(data.get("insider_score", 50.0))
 
         # Analyst score: rec key (40%) + target upside (40%) + coverage breadth (20%)
-        rec_map = {"strong_buy": 90, "buy": 75, "hold": 50, "sell": 25, "strong_sell": 10}
-        rec       = (info.get("recommendationKey") or "").lower()
-        rec_score = rec_map.get(rec, 50)
-        cur_p     = float(info.get("currentPrice") or info.get("regularMarketPrice") or 0)
-        tgt_p     = float(info.get("targetMeanPrice") or 0)
-        upside_sc = float(max(0, min(100, 50 + (tgt_p - cur_p) / max(cur_p, 1) * 200))) if cur_p and tgt_p else 50.0
-        n_ana     = float(info.get("numberOfAnalystOpinions") or 0)
-        cov_sc    = float(max(10, min(100, n_ana / 20 * 100)))
-        analyst_score = 0.40 * rec_score + 0.40 * upside_sc + 0.20 * cov_sc
+        analyst_score = _analyst_score_util(info)
 
         # Tier 1 weighted composite (0–1): news 45%, insider 35%, analyst 20%
         sentiment_raw = (
@@ -604,8 +595,8 @@ class MultiFactorScorer:
             "dividend_raw":        dividend_raw,
             "div_pct":             div * 100,
             "distress_flags":      distress,
-            "data_quality_score":  float(data.get("data_quality_score", 100.0)),
-            "price_freshness":     float(data.get("price_freshness", 100.0)),
+            "data_quality_score":  float(data.get("data_quality_score", 0.0)),
+            "price_freshness":     float(data.get("price_freshness", 50.0)),
             "earnings_days_away":  data.get("earnings_days_away"),
         }
 

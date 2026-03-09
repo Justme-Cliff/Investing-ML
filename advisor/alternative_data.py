@@ -26,7 +26,7 @@ import pandas as pd
 import requests
 
 from config import POSITIVE_WORDS, NEGATIVE_WORDS
-from advisor.smart_money import fetch_smart_money as _fetch_smart_money
+# smart_money import is lazy (inside enrich_top_n) to prevent crash if module missing
 
 # Estimated sentiment factor weight — used to translate sentiment delta → composite delta.
 # Conservative: most profiles weight sentiment 4-7%; we use 6% to stay modest.
@@ -99,6 +99,37 @@ def fetch_options_data(ticker: str, hist_vol: float) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 # Google Trends
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_google_trends_batch(tickers: list) -> dict:
+    """Fetch Google Trends for up to 5 tickers per request (batched). Returns {ticker: score}."""
+    results_out: dict = {}
+    try:
+        from pytrends.request import TrendReq
+        pytrends = TrendReq(hl="en-US", tz=360, timeout=(10, 25))
+        for i in range(0, len(tickers), 5):
+            batch = tickers[i:i+5]
+            try:
+                pytrends.build_payload(batch, cat=0, timeframe="today 3-m", geo="US")
+                interest = pytrends.interest_over_time()
+                for kw in batch:
+                    if kw in interest.columns:
+                        vals = interest[kw].dropna()
+                        if len(vals) >= 4:
+                            ratio = float(vals.iloc[-4:].mean()) / max(float(vals.mean()), 1.0)
+                            results_out[kw] = max(0.0, min(100.0, 50.0 + (ratio - 1.0) * 100.0))
+                        else:
+                            results_out[kw] = 50.0
+                    else:
+                        results_out[kw] = 50.0
+                time.sleep(2)   # one sleep per BATCH of 5, not per ticker
+            except Exception:
+                for kw in batch:
+                    results_out[kw] = 50.0
+    except Exception:
+        for t in tickers:
+            results_out[t] = 50.0
+    return results_out
+
 
 def fetch_google_trends(ticker: str, company_name: str = "") -> float:
     """
@@ -416,6 +447,14 @@ def enrich_top_n(
     total = len(top_tickers)
     print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC · Smart Money)...")
 
+    # Failure tracking — warn if >50% of tickers fail for a source
+    _source_failures = {"options": 0, "trends": 0, "reddit": 0, "av": 0,
+                        "fmp": 0, "sec": 0, "smart_money": 0}
+
+    # Pre-fetch Google Trends in batches (one sleep per 5 tickers instead of per ticker)
+    print("  Pre-fetching Google Trends (batched)...", end="\r", flush=True)
+    _trends_batch = _fetch_google_trends_batch(top_tickers)
+
     # Build SEC CIK map once for smart money lookups.
     # Also populate the module-level _SEC_CIK_CACHE so that fetch_sec_revenue_trend()
     # can reuse it without making a second HTTP request to SEC.
@@ -467,24 +506,38 @@ def enrich_top_n(
 
         # ── Source 3: Options ─────────────────────────────────────────────────
         _bar(i, "Options...    ", ticker)
-        opt       = fetch_options_data(ticker, hist_vol)
+        try:
+            opt = fetch_options_data(ticker, hist_vol)
+        except Exception:
+            opt = {}
+            _source_failures["options"] += 1
         opt_score = opt.get("options_score", 50.0)
         iv_rank   = opt.get("iv_rank")
         if iv_rank is not None:
             universe_data[ticker]["iv_rank"] = iv_rank   # for risk.py
 
-        # ── Google Trends ─────────────────────────────────────────────────────
+        # ── Google Trends (from pre-fetched batch) ────────────────────────────
         _bar(i, "Trends...     ", ticker)
-        trends_score = fetch_google_trends(ticker)
+        trends_score = _trends_batch.get(ticker, 50.0)
+        if trends_score == 50.0 and ticker not in _trends_batch:
+            _source_failures["trends"] += 1
 
         # ── Reddit ────────────────────────────────────────────────────────────
         _bar(i, "Reddit...     ", ticker)
-        reddit_score = fetch_reddit_sentiment(ticker)
+        try:
+            reddit_score = fetch_reddit_sentiment(ticker)
+        except Exception:
+            reddit_score = 50.0
+            _source_failures["reddit"] += 1
         retail_score = 0.60 * trends_score + 0.40 * reddit_score
 
         # ── Source 4: Alpha Vantage — EPS surprise history ────────────────────
         _bar(i, "Alpha Vantage...", ticker)
-        av_data      = fetch_alpha_vantage_earnings(ticker)
+        try:
+            av_data = fetch_alpha_vantage_earnings(ticker)
+        except Exception:
+            av_data = {}
+            _source_failures["av"] += 1
         av_beat_rate = av_data.get("av_eps_beat_rate")
         av_surp_avg  = av_data.get("av_eps_surprise_avg")
         if av_data:
@@ -492,7 +545,11 @@ def enrich_top_n(
 
         # ── Source 5: FMP — analyst revisions + financial rating ──────────────
         _bar(i, "FMP...        ", ticker)
-        fmp_data     = fetch_fmp_data(ticker)
+        try:
+            fmp_data = fetch_fmp_data(ticker)
+        except Exception:
+            fmp_data = {}
+            _source_failures["fmp"] += 1
         fmp_revision = fmp_data.get("fmp_analyst_revision")    # −1 to +1
         fmp_rating   = fmp_data.get("fmp_rating_score")        # 0–100
         fmp_rev_gro  = fmp_data.get("fmp_revenue_growth")      # YoY %
@@ -503,23 +560,24 @@ def enrich_top_n(
         # Only fetch from SEC if yfinance revenue is missing (saves bandwidth)
         _bar(i, "SEC EDGAR...  ", ticker)
         sec_data = {}
-        if data.get("revenue_trend") is None and info.get("totalRevenue") is None:
-            sec_data = fetch_sec_revenue_trend(ticker)
-            if sec_data.get("sec_revenue_trend") is not None:
-                universe_data[ticker]["sec_revenue_trend"] = sec_data["sec_revenue_trend"]
+        try:
+            if data.get("revenue_trend") is None and info.get("totalRevenue") is None:
+                sec_data = fetch_sec_revenue_trend(ticker)
+                if sec_data.get("sec_revenue_trend") is not None:
+                    universe_data[ticker]["sec_revenue_trend"] = sec_data["sec_revenue_trend"]
+        except Exception:
+            _source_failures["sec"] += 1
 
         # ── Source 7: SEC Smart Money — Form 4 cluster + 8-K NLP ─────────────
-        # Form 4 cluster: 3+ insiders buying in 60d = conviction signal.
-        # 8-K sentiment: positive catalyst items (earnings, M&A) vs negative
-        # (impairments, restatements, officer resignations).
         _bar(i, "Smart Money...", ticker)
         sm_data = {}
         try:
+            from advisor.smart_money import fetch_smart_money as _fetch_smart_money
             sm_data = _fetch_smart_money(ticker, _cik_map)
             if sm_data:
                 universe_data[ticker]["smart_money"] = sm_data
         except Exception:
-            pass
+            _source_failures["smart_money"] += 1
 
         # ── Build full 5-source sentiment (0–100) ─────────────────────────────
         news_score    = float(data.get("sentiment",     50.0))
@@ -604,6 +662,11 @@ def enrich_top_n(
         _bar(i + 1, "done          ", ticker)
 
     print(f"  [{'█' * 20}] 100%  {total}/{total}  Tier 2 enrichment complete." + " " * 10)
+
+    # Print warnings for sources with >50% failure rate
+    for src, count in _source_failures.items():
+        if total > 0 and count > total / 2:
+            print(f"  [!] Tier 2 warning: '{src}' failed for {count}/{total} tickers — check network/API key.")
 
     # Re-rank
     ranked_df = ranked_df.sort_values("composite_score", ascending=False).reset_index(drop=True)
