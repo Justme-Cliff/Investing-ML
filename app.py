@@ -28,6 +28,7 @@ from config import (
     RISK_LABELS, GOAL_LABELS, HORIZON_LABELS,
     DYNAMIC_UNIVERSE, UNIVERSE_MIN_MARKET_CAP, UNIVERSE_MAX_TICKERS, PORTFOLIO_N,
     FRESH_PICKS_PENALTY, VERSION,
+    LIVE_MONITOR_STREAMS, LIVE_MONITOR_RSS_FEEDS, LIVE_MONITOR_MOVERS_TICKERS,
 )
 from advisor.collector    import UserProfile
 from advisor.fetcher      import DataFetcher, MacroFetcher
@@ -1124,6 +1125,1131 @@ def run_analysis(profile: UserProfile) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# LIVE MONITOR v2 — Bloomberg Terminal command centre
+# ─────────────────────────────────────────────────────────────────────────────
+import yfinance as _yf
+import requests as _req_live
+import feedparser as _feedparser
+from datetime import datetime, timezone, timedelta
+
+
+def _lm_autorefresh(interval_ms: int = 20_000):
+    """Auto-refresh the monitor. Uses streamlit-autorefresh if installed."""
+    try:
+        from streamlit_autorefresh import st_autorefresh
+        return st_autorefresh(interval=interval_ms, limit=None, key="lm_ar_v2")
+    except ImportError:
+        pass
+    return 0
+
+
+def _lm_history_tickers() -> list:
+    """Load tickers from the last 5 analysis sessions stored in history.json."""
+    try:
+        hist_file = os.path.join("memory", "history.json")
+        if not os.path.exists(hist_file):
+            return []
+        with open(hist_file, encoding="utf-8") as f:
+            raw = json.load(f)
+        sessions = raw if isinstance(raw, list) else raw.get("sessions", [])
+        seen, tickers = set(), []
+        for sess in reversed(sessions[-5:]):
+            for pick in sess.get("picks", []):
+                t = pick.get("ticker", "").strip().upper()
+                if t and t not in seen:
+                    seen.add(t)
+                    tickers.append(t)
+        return tickers
+    except Exception:
+        return []
+
+
+# ── Cached data fetchers (module-level required for @st.cache_data) ──────────
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _lm_indices():
+    """Fetch real-time quotes for major indices + commodities via yfinance."""
+    symbols = {
+        "^GSPC":    ("S&P 500",    False), "^IXIC":   ("NASDAQ",    False),
+        "^DJI":     ("DOW 30",     False), "^RUT":    ("RUSSELL 2K",False),
+        "^VIX":     ("VIX",        True),  "^TNX":    ("10Y YIELD", False),
+        "^IRX":     ("3M YIELD",   False), "GLD":     ("GOLD",      False),
+        "SLV":      ("SILVER",     False), "BTC-USD": ("BITCOIN",   False),
+        "ETH-USD":  ("ETHEREUM",   False), "DX-Y.NYB":("DXY",       False),
+        "CL=F":     ("OIL WTI",    False), "NG=F":    ("NAT GAS",   False),
+        "HG=F":     ("COPPER",     False), "^FTSE":   ("FTSE 100",  False),
+        "^N225":    ("NIKKEI 225", False), "^HSI":    ("HANG SENG", False),
+    }
+    results = {}
+    for sym, (label, invert) in symbols.items():
+        try:
+            hist = _yf.Ticker(sym).history(period="5d", interval="1d")
+            if len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev  = float(hist["Close"].iloc[-2])
+                chg   = price - prev
+                pct   = chg / prev * 100
+                results[sym] = {"label": label, "price": price, "chg": chg, "pct": pct, "invert": invert}
+        except Exception:
+            pass
+    return results
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _lm_sectors():
+    etfs = {
+        "XLK": "Technology", "XLF": "Financials", "XLV": "Healthcare",
+        "XLY": "Consumer",   "XLE": "Energy",     "XLI": "Industrials",
+        "XLU": "Utilities",  "XLRE": "Real Estate","XLB": "Materials", "XLC": "Comm.",
+    }
+    results = {}
+    for sym, name in etfs.items():
+        try:
+            hist = _yf.Ticker(sym).history(period="5d", interval="1d")
+            if len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev  = float(hist["Close"].iloc[-2])
+                pct   = (price - prev) / prev * 100
+                results[sym] = {"name": name, "price": price, "pct": pct}
+        except Exception:
+            pass
+    return results
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _lm_portfolio_data(tickers: tuple):
+    """Deep per-ticker data for portfolio intelligence panel."""
+    results = {}
+    for sym in tickers:
+        try:
+            tk   = _yf.Ticker(sym)
+            hist = tk.history(period="3mo", interval="1d")
+            if len(hist) < 5:
+                continue
+            info  = {}
+            try:   info = tk.info or {}
+            except Exception: pass
+
+            price  = float(hist["Close"].iloc[-1])
+            prev   = float(hist["Close"].iloc[-2])
+            day_chg = (price - prev) / prev * 100
+
+            # RSI-14
+            closes  = hist["Close"].values
+            deltas  = np.diff(closes)
+            gains   = np.where(deltas > 0, deltas, 0.0)
+            losses  = np.where(deltas < 0, -deltas, 0.0)
+            ag = np.mean(gains[-14:]) if len(gains) >= 14 else np.mean(gains)
+            al = np.mean(losses[-14:]) if len(losses) >= 14 else np.mean(losses)
+            rsi = 100 - (100 / (1 + ag / al)) if al > 0 else 50.0
+
+            # MACD
+            ema12 = hist["Close"].ewm(span=12, adjust=False).mean()
+            ema26 = hist["Close"].ewm(span=26, adjust=False).mean()
+            macd_line   = ema12 - ema26
+            signal_line = macd_line.ewm(span=9, adjust=False).mean()
+            macd_hist   = float(macd_line.iloc[-1] - signal_line.iloc[-1])
+            macd_cross  = "BULL" if macd_hist > 0 else "BEAR"
+
+            # SMA
+            sma50  = float(hist["Close"].tail(50).mean())  if len(hist) >= 50 else None
+            sma200 = float(hist["Close"].tail(200).mean()) if len(hist) >= 200 else None
+            trend  = "ABOVE" if sma50 and price > sma50 else "BELOW"
+
+            # Volume ratio
+            vol      = float(hist["Volume"].iloc[-1])
+            avg_vol  = float(hist["Volume"].tail(20).mean())
+            vol_ratio = vol / avg_vol if avg_vol > 0 else 1.0
+
+            # 52-week range position
+            high52 = float(hist["High"].max())
+            low52  = float(hist["Low"].min())
+            pos52  = (price - low52) / (high52 - low52) * 100 if high52 != low52 else 50.0
+
+            # 1-week momentum
+            week_chg = (price - float(hist["Close"].iloc[-6])) / float(hist["Close"].iloc[-6]) * 100 if len(hist) >= 6 else 0.0
+
+            # from info
+            pe       = info.get("trailingPE")
+            fwd_pe   = info.get("forwardPE")
+            mktcap   = info.get("marketCap", 0) or 0
+            div_yld  = (info.get("dividendYield") or 0) * 100
+            beta     = info.get("beta")
+            short_pct = (info.get("shortPercentOfFloat") or 0) * 100
+            earn_date = info.get("earningsDate")
+
+            results[sym] = {
+                "price": price, "prev": prev, "day_chg": day_chg,
+                "rsi": rsi, "macd_hist": macd_hist, "macd_cross": macd_cross,
+                "sma50": sma50, "sma200": sma200, "trend": trend,
+                "vol_ratio": vol_ratio, "pos52": pos52,
+                "high52": high52, "low52": low52,
+                "week_chg": week_chg,
+                "pe": pe, "fwd_pe": fwd_pe, "mktcap": mktcap,
+                "div_yld": div_yld, "beta": beta, "short_pct": short_pct,
+                "earn_date": str(earn_date) if earn_date else None,
+            }
+        except Exception:
+            pass
+    return results
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _lm_movers(tickers: tuple):
+    """Top gainers/losers from combined history + universe tickers."""
+    all_tickers = list(dict.fromkeys(list(tickers) + LIVE_MONITOR_MOVERS_TICKERS))
+    data = []
+    for sym in all_tickers[:40]:
+        try:
+            hist = _yf.Ticker(sym).history(period="5d", interval="1d")
+            if len(hist) >= 2:
+                price = float(hist["Close"].iloc[-1])
+                prev  = float(hist["Close"].iloc[-2])
+                pct   = (price - prev) / prev * 100
+                data.append({"ticker": sym, "price": price, "pct": pct})
+        except Exception:
+            pass
+    data.sort(key=lambda x: x["pct"], reverse=True)
+    return data[:8], list(reversed(data[-8:]))
+
+
+@st.cache_data(ttl=45, show_spinner=False)
+def _lm_crypto():
+    """CoinGecko free API — https://www.coingecko.com/en/api/documentation"""
+    try:
+        url = (
+            "https://api.coingecko.com/api/v3/simple/price"
+            "?ids=bitcoin,ethereum,solana,ripple,dogecoin,cardano,avalanche-2,chainlink"
+            "&vs_currencies=usd&include_24hr_change=true&include_market_cap=true"
+        )
+        r = _req_live.get(url, timeout=7, headers={"Accept": "application/json"})
+        if r.status_code == 200:
+            raw = r.json()
+            mapping = {
+                "bitcoin": "BTC", "ethereum": "ETH", "solana": "SOL",
+                "ripple": "XRP", "dogecoin": "DOGE", "cardano": "ADA",
+                "avalanche-2": "AVAX", "chainlink": "LINK",
+            }
+            return {
+                mapping[k]: {
+                    "price": v.get("usd", 0),
+                    "chg24": v.get("usd_24h_change", 0) or 0,
+                    "mcap":  v.get("usd_market_cap", 0) or 0,
+                }
+                for k, v in raw.items() if k in mapping
+            }
+    except Exception:
+        pass
+    return {}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _lm_forex():
+    """Frankfurter ECB API — https://www.frankfurter.app/docs"""
+    try:
+        url = "https://api.frankfurter.app/latest?from=USD&to=EUR,GBP,JPY,CNY,CAD,AUD,CHF,INR,KRW,MXN,BRL,SGD"
+        r = _req_live.get(url, timeout=6)
+        if r.status_code == 200:
+            return r.json().get("rates", {})
+    except Exception:
+        pass
+    return {}
+
+
+_LM_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def _lm_news(feed_name: str, feed_url: str, badge_color: str = "#00FF41"):
+    """Fetch a single RSS feed using requests+UA to bypass bot blocks."""
+    articles = []
+    try:
+        r = _req_live.get(
+            feed_url,
+            headers={"User-Agent": _LM_UA, "Accept": "application/rss+xml, application/xml, text/xml, */*"},
+            timeout=7,
+        )
+        feed = _feedparser.parse(r.content if r.status_code == 200 else feed_url)
+        for e in feed.entries[:10]:
+            title = (e.get("title") or "").strip()
+            if not title:
+                continue
+            articles.append({
+                "source":    feed_name,
+                "color":     badge_color,
+                "title":     title,
+                "link":      e.get("link", ""),
+                "published": (e.get("published") or e.get("updated") or "")[:25],
+                "summary":   ((e.get("summary") or e.get("description") or "")[:220]).strip(),
+            })
+    except Exception:
+        pass
+    return articles
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def _lm_all_news():
+    """Load every configured RSS feed in parallel, return deduplicated merged list."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(args):
+        name, url, color = args
+        arts = []
+        try:
+            r = _req_live.get(
+                url,
+                headers={"User-Agent": _LM_UA, "Accept": "application/rss+xml, application/xml, text/xml, */*"},
+                timeout=7,
+            )
+            feed = _feedparser.parse(r.content if r.status_code == 200 else url)
+            for e in feed.entries[:10]:
+                title = (e.get("title") or "").strip()
+                if not title:
+                    continue
+                arts.append({
+                    "source":    name,
+                    "color":     color,
+                    "title":     title,
+                    "link":      e.get("link", ""),
+                    "published": (e.get("published") or e.get("updated") or "")[:25],
+                    "summary":   (e.get("summary") or e.get("description") or "")[:600],
+                })
+        except Exception:
+            pass
+        return arts
+
+    all_arts = []
+    with ThreadPoolExecutor(max_workers=len(LIVE_MONITOR_RSS_FEEDS)) as pool:
+        futures = [pool.submit(_fetch_one, f) for f in LIVE_MONITOR_RSS_FEEDS]
+        for fut in futures:
+            try:
+                all_arts.extend(fut.result())
+            except Exception:
+                pass
+
+    # Deduplicate by first 60 chars of cleaned title (lowercased)
+    import html as _html_dd, re as _re_dd
+    def _title_key(t):
+        t = _html_dd.unescape(t or "")
+        t = _re_dd.sub(r"<[^>]+>", "", t)
+        return t[:60].lower().strip()
+
+    seen, unique = set(), []
+    for a in all_arts:
+        key = _title_key(a["title"])
+        if key and key not in seen:
+            seen.add(key)
+            unique.append(a)
+    return unique
+
+
+# ── Background preloader — warms all live-monitor caches on app startup ───────
+_LM_PRELOAD_STARTED = False
+
+def _lm_preload():
+    """Call once at startup to fill caches before the user opens Live Monitor."""
+    global _LM_PRELOAD_STARTED
+    if _LM_PRELOAD_STARTED:
+        return
+    _LM_PRELOAD_STARTED = True
+    import threading
+    def _warm():
+        try: _lm_indices()
+        except Exception: pass
+        try: _lm_sectors()
+        except Exception: pass
+        try: _lm_movers(tuple(LIVE_MONITOR_MOVERS_TICKERS[:10]))
+        except Exception: pass
+        try: _lm_crypto()
+        except Exception: pass
+        try: _lm_forex()
+        except Exception: pass
+        try: _lm_all_news()
+        except Exception: pass
+    threading.Thread(target=_warm, daemon=True).start()
+
+
+# ── CSS ───────────────────────────────────────────────────────────────────────
+_LM_CSS = """
+<style>
+@keyframes lmPulse  { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(1.3)} }
+@keyframes lmScroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+@keyframes lmBlink  { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes lmFadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+@keyframes lmFlip { 0%{transform:perspective(300px) rotateX(0deg);opacity:1} 40%{transform:perspective(300px) rotateX(90deg);opacity:0} 60%{transform:perspective(300px) rotateX(-90deg);opacity:0} 100%{transform:perspective(300px) rotateX(0deg);opacity:1} }
+.lm-num { display:inline-block; transform-style:preserve-3d; }
+.lm-flip { animation:lmFlip 0.35s ease-in-out; }
+
+.lm-tape-wrap {
+    overflow:hidden; background:#000A04;
+    border-top:2px solid #002810; border-bottom:2px solid #002810;
+    padding:6px 0; white-space:nowrap;
+}
+.lm-tape {
+    display:inline-block;
+    animation:lmScroll 80s linear infinite;
+    font-size:12px; font-weight:700;
+    font-family:'JetBrains Mono',monospace; letter-spacing:.05em; white-space:nowrap;
+}
+.lm-tape-item { display:inline-block; margin-right:36px; }
+.lm-tape-sep  { color:#003A14; margin-right:36px; font-size:10px; }
+
+.lm-hdr-bar {
+    background:linear-gradient(90deg,#000A04 0%,#001208 50%,#000A04 100%);
+    border:1px solid #003A14; border-radius:4px 4px 0 0;
+    padding:9px 18px; display:flex; align-items:center; gap:20px;
+    font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase;
+}
+
+.lm-idx {
+    background:#010D05; border:1px solid #002810;
+    border-top:3px solid var(--lm-ac,#00FF41);
+    border-radius:3px; padding:11px 13px; min-height:82px;
+    animation:lmFadeIn .4s ease both;
+}
+.lm-idx-lbl {
+    font-size:8.5px; font-weight:700; letter-spacing:.15em;
+    color:#1A5C30; text-transform:uppercase; margin-bottom:5px;
+    font-family:'JetBrains Mono',monospace;
+}
+.lm-idx-val {
+    font-size:19px; font-weight:800; color:#CCFFE6; line-height:1.1;
+    font-variant-numeric:tabular-nums; font-family:'JetBrains Mono',monospace;
+}
+.lm-idx-chg {
+    font-size:11px; font-weight:700; margin-top:5px;
+    font-variant-numeric:tabular-nums; font-family:'JetBrains Mono',monospace;
+}
+.lm-idx-vol {
+    font-size:9px; color:#1A5C30; margin-top:2px;
+    font-family:'JetBrains Mono',monospace;
+}
+
+.lm-sec-cell {
+    border:1px solid #001A08; border-radius:2px; padding:7px 8px; text-align:center;
+    transition:border-color .2s;
+}
+.lm-sec-lbl {
+    font-size:8px; font-weight:700; letter-spacing:.1em;
+    color:#1A5C30; text-transform:uppercase; margin-bottom:3px;
+    font-family:'JetBrains Mono',monospace;
+}
+.lm-sec-pct { font-size:13px; font-weight:800; font-variant-numeric:tabular-nums; font-family:'JetBrains Mono',monospace; }
+
+.lm-panel {
+    background:#010D05; border:1px solid #002810;
+    border-radius:3px; padding:13px; height:100%;
+}
+.lm-phdr {
+    font-size:8.5px; font-weight:700; letter-spacing:.15em;
+    color:#1A5C30; text-transform:uppercase;
+    border-bottom:1px solid #002010; padding-bottom:7px; margin-bottom:11px;
+    font-family:'JetBrains Mono',monospace; display:flex; justify-content:space-between;
+}
+
+.lm-port-tbl { width:100%; border-collapse:collapse; font-family:'JetBrains Mono',monospace; font-size:11.5px; }
+.lm-port-tbl th {
+    font-size:8px; font-weight:700; letter-spacing:.12em; color:#1A5C30;
+    text-transform:uppercase; padding:6px 8px;
+    border-bottom:1px solid #002010; text-align:right; white-space:nowrap;
+}
+.lm-port-tbl th:first-child { text-align:left; }
+.lm-port-tbl td {
+    padding:7px 8px; border-bottom:1px solid #001508;
+    color:#B8E6CC; text-align:right; vertical-align:middle;
+    font-variant-numeric:tabular-nums; white-space:nowrap;
+}
+.lm-port-tbl td:first-child { text-align:left; color:#CCFFE6; font-weight:700; }
+.lm-port-tbl tr:last-child td { border-bottom:none; }
+.lm-port-tbl tr:hover td { background:#001A08; }
+
+.lm-signal {
+    display:inline-block; padding:2px 7px; border-radius:2px;
+    font-size:9px; font-weight:800; letter-spacing:.08em; text-transform:uppercase;
+    font-family:'JetBrains Mono',monospace; white-space:nowrap;
+}
+
+.lm-row {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:5px 0; border-bottom:1px solid #001508; font-size:11.5px;
+    font-family:'JetBrains Mono',monospace;
+}
+.lm-row:last-child { border-bottom:none; }
+.lm-row-lbl { font-weight:700; color:#80FFB4; letter-spacing:.04em; }
+.lm-row-sub { font-size:9px; color:#1A5C30; }
+
+.lm-news-item {
+    padding:8px 0; border-bottom:1px solid #001508; line-height:1.4;
+    animation:lmFadeIn .5s ease both;
+}
+.lm-news-item:last-child { border-bottom:none; }
+.lm-news-src {
+    font-size:8px; font-weight:700; letter-spacing:.14em;
+    color:#1A5C30; text-transform:uppercase; margin-bottom:2px;
+    font-family:'JetBrains Mono',monospace;
+}
+.lm-news-ttl {
+    font-size:12px; color:#CCFFE6; font-weight:500;
+    font-family:'Inter',-apple-system,sans-serif;
+}
+.lm-news-time { font-size:9px; color:#0F3A1C; margin-top:2px; font-family:'JetBrains Mono',monospace; }
+
+.lm-bar-wrap {
+    background:#001508; border-radius:2px; height:5px; overflow:hidden; margin:3px 0;
+}
+.lm-bar-fill { height:100%; border-radius:2px; }
+
+.lm-vid-sel {
+    background:#010D05; border:1px solid #002810; border-radius:2px;
+    font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700;
+    color:#80FFB4; text-transform:uppercase; letter-spacing:.05em;
+    padding:4px 6px; width:100%;
+}
+
+.lm-divider {
+    border:none; border-top:1px solid #001A08; margin:12px 0;
+}
+</style>
+"""
+
+
+def _lm_color(pct, invert=False):
+    pos = (pct >= 0) if not invert else (pct < 0)
+    return ("#00FF41", "#001A09") if pos else ("#FF3030", "#1C0303")
+
+
+def _lm_sig(rsi, day_chg, vol_ratio, pos52, macd_cross="BULL", week_chg=0):
+    """Multi-factor buy/sell signal. Returns (label, text_color, bg_color)."""
+    s = 0
+    # RSI
+    if rsi < 28:   s += 3
+    elif rsi < 38: s += 2
+    elif rsi < 48: s += 1
+    elif rsi > 78: s -= 3
+    elif rsi > 68: s -= 2
+    elif rsi > 58: s -= 1
+    # MACD
+    if macd_cross == "BULL": s += 1
+    else:                    s -= 1
+    # Day change momentum
+    if day_chg > 3:    s += 1
+    elif day_chg < -3: s -= 1
+    # Volume confirmation
+    if vol_ratio > 1.8 and day_chg > 0: s += 1
+    if vol_ratio > 1.8 and day_chg < 0: s -= 1
+    # 52W position
+    if pos52 < 12:   s += 2
+    elif pos52 < 22: s += 1
+    elif pos52 > 88: s -= 2
+    elif pos52 > 78: s -= 1
+    # 1-week trend
+    if week_chg > 4:    s += 1
+    elif week_chg < -4: s -= 1
+
+    if s >= 5:   return "STRONG BUY",  "#00FF41", "#001A09"
+    elif s >= 2: return "BUY",         "#00CC33", "#001205"
+    elif s == 1: return "WATCH",       "#FFD700", "#1A1500"
+    elif s == 0: return "HOLD",        "#5A8A70", "#010D05"
+    elif s >= -2: return "SELL",       "#FF5050", "#1C0303"
+    else:         return "STRONG SELL","#FF0000", "#200000"
+
+
+def tab_live_monitor():
+    """Bloomberg Terminal command centre — v2."""
+    st.markdown(_LM_CSS, unsafe_allow_html=True)
+
+    # ── Initialise session state for stream selections (first visit only) ───
+    stream_keys = list(LIVE_MONITOR_STREAMS.keys())
+    _stream_defaults = {
+        "lm_s1": "Bloomberg TV",
+        "lm_s2": "CNBC Television",
+        "lm_s3": "Al Jazeera (World/War)",
+        "lm_s4": "France 24 English",
+    }
+    for _k, _v in _stream_defaults.items():
+        if st.session_state.get(_k) not in stream_keys:
+            st.session_state[_k] = _v   # only set if missing or invalid
+
+    # ── Refresh button (top-right) ────────────────────────────────────────────
+    _rb_spacer, _rb_col = st.columns([11, 1])
+    with _rb_col:
+        force_refresh = st.button("⟳", key="lm_force", use_container_width=True,
+                                  help="Force-refresh all data")
+
+    _lm_live_body(force_refresh)
+
+
+def _lm_live_body(force_refresh: bool = False):
+    """All live data panels — called inside st.fragment for silent background refresh."""
+    if force_refresh:
+        _lm_indices.clear(); _lm_sectors.clear(); _lm_movers.clear()
+        _lm_crypto.clear();  _lm_forex.clear();  _lm_portfolio_data.clear()
+        _lm_all_news.clear(); _lm_news.clear()
+
+    # ── Time & market status ───────────────────────────────────────────────
+    now_utc = datetime.now(timezone.utc)
+    now_est = now_utc.astimezone(timezone(timedelta(hours=-5)))
+    mm = now_est.hour * 60 + now_est.minute
+    mkt_open  = now_est.weekday() < 5 and (9*60+30) <= mm < (16*60)
+    mkt_pre   = now_est.weekday() < 5 and (4*60)    <= mm < (9*60+30)
+    mkt_after = now_est.weekday() < 5 and (16*60)   <= mm < (20*60)
+    if mkt_open:    mkt_label, mkt_col = "● MARKETS OPEN",  "#00FF41"
+    elif mkt_pre:   mkt_label, mkt_col = "◐ PRE-MARKET",    "#FFD700"
+    elif mkt_after: mkt_label, mkt_col = "◑ AFTER-HOURS",   "#FF9900"
+    else:           mkt_label, mkt_col = "○ MARKETS CLOSED", "#FF3030"
+
+    hist_tickers = _lm_history_tickers()
+    tape_tickers = hist_tickers if hist_tickers else LIVE_MONITOR_MOVERS_TICKERS[:10]
+
+    # Header bar
+    st.markdown(
+        f'<div class="lm-hdr-bar">'
+        f'<span style="color:#00FF41;font-size:15px;letter-spacing:.18em;font-family:\'JetBrains Mono\',monospace">◈ LIVE MONITOR</span>'
+        f'<span style="color:#003A14">│</span>'
+        f'<span style="color:#4DBF7F;font-family:\'JetBrains Mono\',monospace">{now_utc.strftime("%H:%M:%S UTC")}</span>'
+        f'<span style="color:#003A14">│</span>'
+        f'<span style="color:#3A7A55;font-family:\'JetBrains Mono\',monospace">{now_est.strftime("%a %b %d  %I:%M:%S %p EST")}</span>'
+        f'<span style="color:#003A14">│</span>'
+        f'<span style="color:{mkt_col};font-family:\'JetBrains Mono\',monospace">{mkt_label}</span>'
+        f'<span style="color:#003A14">│</span>'
+        f'<span style="color:#1A5C30;font-size:9px;font-family:\'JetBrains Mono\',monospace">'
+        f'LIVE · CLICK ⟳ TO REFRESH  ·  '
+        f'{"TRACKING " + str(len(hist_tickers)) + " HISTORY TICKERS" if hist_tickers else "RUN ANALYSIS TO TRACK YOUR PICKS"}'
+        f'</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Fetch all data ─────────────────────────────────────────────────────
+    idx_data    = _lm_indices()
+    sector_data = _lm_sectors()
+    gainers, losers = _lm_movers(tuple(tape_tickers))
+    crypto_data = _lm_crypto()
+    forex_data  = _lm_forex()
+    port_data   = _lm_portfolio_data(tuple(hist_tickers)) if hist_tickers else {}
+    all_news    = _lm_all_news()
+
+    # ── Ticker tape — wraps in st.fragment for silent 30s live refresh ─────
+    def _build_tape_html(p_data, i_data, c_data, t_tickers):
+        items = []
+        for sym in t_tickers:
+            d = p_data.get(sym)
+            if d:
+                tc, _ = _lm_color(d["day_chg"])
+                s = "+" if d["day_chg"] >= 0 else ""
+                items.append(
+                    f'<span class="lm-tape-item">'
+                    f'<span style="color:#FFD700">{sym}</span> '
+                    f'<span class="lm-num" style="color:#CCFFE6">${d["price"]:,.2f}</span> '
+                    f'<span class="lm-num" style="color:{tc}">{s}{d["day_chg"]:.2f}%</span>'
+                    f'</span><span class="lm-tape-sep">◇</span>'
+                )
+        for sym in ["^GSPC","^IXIC","^DJI","^VIX","^TNX","GLD","BTC-USD","CL=F"]:
+            d = i_data.get(sym)
+            if d:
+                tc, _ = _lm_color(d["pct"], d.get("invert", False))
+                s = "+" if d["pct"] >= 0 else ""
+                items.append(
+                    f'<span class="lm-tape-item">'
+                    f'<span style="color:#80FFB4">{d["label"]}</span> '
+                    f'<span class="lm-num" style="color:#CCFFE6">{d["price"]:,.2f}</span> '
+                    f'<span class="lm-num" style="color:{tc}">{s}{d["pct"]:.2f}%</span>'
+                    f'</span><span class="lm-tape-sep">◇</span>'
+                )
+        for sym, d in list(c_data.items())[:4]:
+            tc, _ = _lm_color(d["chg24"])
+            s = "+" if d["chg24"] >= 0 else ""
+            items.append(
+                f'<span class="lm-tape-item">'
+                f'<span style="color:#80FFB4">{sym}</span> '
+                f'<span class="lm-num" style="color:#CCFFE6">${d["price"]:,.2f}</span> '
+                f'<span class="lm-num" style="color:{tc}">{s}{d["chg24"]:.2f}%</span>'
+                f'</span><span class="lm-tape-sep">◇</span>'
+            )
+        tc_str = "".join(items)
+        return f'<div class="lm-tape-wrap"><div class="lm-tape">{tc_str}{tc_str}</div></div>'
+
+    try:
+        @st.fragment(run_every=30)
+        def _ticker_frag():
+            _idx  = _lm_indices()
+            _port = _lm_portfolio_data(tuple(tape_tickers)) if tape_tickers else {}
+            _cry  = _lm_crypto()
+            tape_html = _build_tape_html(_port, _idx, _cry, tape_tickers)
+            st.markdown(tape_html, unsafe_allow_html=True)
+            # Solari flip-board animation — runs every 2s on random ticker values
+            st.markdown("""
+<script>
+(function(){
+  function flipSome(){
+    var nums = document.querySelectorAll('.lm-num');
+    if(!nums.length) return;
+    var pick = Math.min(6, Math.floor(nums.length * 0.15) + 2);
+    var idxs = [];
+    while(idxs.length < pick){
+      var r = Math.floor(Math.random() * nums.length);
+      if(idxs.indexOf(r) < 0) idxs.push(r);
+    }
+    idxs.forEach(function(i){
+      var el = nums[i];
+      el.classList.add('lm-flip');
+      el.addEventListener('animationend', function(){ el.classList.remove('lm-flip'); }, {once:true});
+    });
+  }
+  setInterval(flipSome, 2000);
+})();
+</script>""", unsafe_allow_html=True)
+        _ticker_frag()
+    except Exception:
+        tape_html = _build_tape_html(port_data, idx_data, crypto_data, tape_tickers)
+        st.markdown(tape_html, unsafe_allow_html=True)
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # ── Row 1: Major indices — 9 cols ──────────────────────────────────────
+    row1 = ["^GSPC","^IXIC","^DJI","^RUT","^VIX","^TNX","GLD","BTC-USD","CL=F"]
+    cols = st.columns(9)
+    for i, sym in enumerate(row1):
+        d = idx_data.get(sym)
+        if not d: continue
+        tc, _ = _lm_color(d["pct"], d.get("invert", False))
+        sg = "+" if d["pct"] >= 0 else ""
+        pf = f"{d['price']:,.2f}"
+        with cols[i]:
+            st.markdown(
+                f'<div class="lm-idx" style="--lm-ac:{tc}">'
+                f'<div class="lm-idx-lbl">{d["label"]}</div>'
+                f'<div class="lm-idx-val">{pf}</div>'
+                f'<div class="lm-idx-chg" style="color:{tc}">{sg}{d["chg"]:+.2f}  {sg}{d["pct"]:.2f}%</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+    # ── Row 2: Additional indices — 9 cols ─────────────────────────────────
+    row2 = ["^IRX","SLV","ETH-USD","DX-Y.NYB","NG=F","HG=F","^FTSE","^N225","^HSI"]
+    cols2 = st.columns(9)
+    for i, sym in enumerate(row2):
+        d = idx_data.get(sym)
+        if not d: continue
+        tc, _ = _lm_color(d["pct"], d.get("invert", False))
+        sg = "+" if d["pct"] >= 0 else ""
+        pf = f"{d['price']:,.2f}"
+        with cols2[i]:
+            st.markdown(
+                f'<div class="lm-idx" style="--lm-ac:{tc};opacity:.9">'
+                f'<div class="lm-idx-lbl">{d["label"]}</div>'
+                f'<div class="lm-idx-val" style="font-size:16px">{pf}</div>'
+                f'<div class="lm-idx-chg" style="color:{tc};font-size:10px">{sg}{d["chg"]:+.2f}  {sg}{d["pct"]:.2f}%</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+    # ── Sector heatmap ─────────────────────────────────────────────────────
+    st.markdown(
+        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:8.5px;font-weight:700;'
+        'letter-spacing:.15em;color:#1A5C30;text-transform:uppercase;margin-bottom:6px">'
+        'SECTOR PERFORMANCE · 1D CHANGE</div>',
+        unsafe_allow_html=True,
+    )
+    scols = st.columns(10)
+    for i, (sym, d) in enumerate(sector_data.items()):
+        tc, _ = _lm_color(d["pct"])
+        sg    = "+" if d["pct"] >= 0 else ""
+        bg    = "002208" if d["pct"] >= 0 else "180200"
+        intensity = min(abs(d["pct"]) / 2.5, 1.0)
+        border_op = f"{tc}{int(intensity*255):02X}"
+        with scols[i]:
+            st.markdown(
+                f'<div class="lm-sec-cell" style="background:#{bg};border-color:{border_op}">'
+                f'<div class="lm-sec-lbl">{d["name"]}</div>'
+                f'<div class="lm-sec-pct" style="color:{tc}">{sg}{d["pct"]:.2f}%</div>'
+                f'<div class="lm-bar-wrap"><div class="lm-bar-fill" style="width:{min(abs(d["pct"])/3*100,100):.0f}%;background:{tc}"></div></div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ── Portfolio Intelligence table ───────────────────────────────────────
+    if port_data:
+        vix_val = idx_data.get("^VIX", {}).get("price", 20)
+        st.markdown(
+            f'<div class="lm-panel">'
+            f'<div class="lm-phdr">'
+            f'<span>◎ PORTFOLIO INTELLIGENCE  ·  {len(port_data)} POSITIONS FROM YOUR ANALYSIS HISTORY</span>'
+            f'<span style="color:#FFD700">VIX {vix_val:.1f}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        # Build table
+        rows_html = ""
+        for sym, d in sorted(port_data.items()):
+            sig_lbl, sig_tc, sig_bg = _lm_sig(
+                d["rsi"], d["day_chg"], d["vol_ratio"], d["pos52"],
+                d["macd_cross"], d.get("week_chg", 0)
+            )
+            dc_tc, _ = _lm_color(d["day_chg"])
+            wc_tc, _ = _lm_color(d.get("week_chg", 0))
+            rsi      = d["rsi"]
+            rsi_tc   = "#00FF41" if rsi < 35 else ("#FF3030" if rsi > 70 else "#CCFFE6")
+            vol_str  = f"{d['vol_ratio']:.1f}x"
+            vol_tc   = "#FFD700" if d["vol_ratio"] > 1.5 else "#4DBF7F"
+            pos52_w  = int(d["pos52"])
+            pos_bar  = (
+                f'<div class="lm-bar-wrap" style="width:60px;display:inline-block;vertical-align:middle">'
+                f'<div class="lm-bar-fill" style="width:{pos52_w}%;background:#4DBF7F"></div>'
+                f'</div>'
+                f'<span style="font-size:9px;color:#1A5C30;margin-left:4px">{pos52_w}%</span>'
+            )
+            pe_str   = f"{d['pe']:.1f}" if d.get("pe") else "—"
+            beta_str = f"{d['beta']:.2f}" if d.get("beta") else "—"
+            mcap_b   = d.get("mktcap", 0) / 1e9
+            mcap_str = f"${mcap_b:.1f}B" if mcap_b >= 1 else f"${mcap_b*1000:.0f}M"
+            rows_html += (
+                f'<tr>'
+                f'<td>{sym}</td>'
+                f'<td>${d["price"]:,.2f}</td>'
+                f'<td style="color:{dc_tc}">{d["day_chg"]:+.2f}%</td>'
+                f'<td style="color:{wc_tc}">{d.get("week_chg",0):+.2f}%</td>'
+                f'<td style="color:{rsi_tc}">{rsi:.0f}</td>'
+                f'<td>{pos_bar}</td>'
+                f'<td style="color:{vol_tc}">{vol_str}</td>'
+                f'<td><span style="color:{d["macd_cross"] == "BULL" and "#00FF41" or "#FF3030"}">'
+                f'{d["macd_cross"]}</span></td>'
+                f'<td>{pe_str}</td>'
+                f'<td>{beta_str}</td>'
+                f'<td>{mcap_str}</td>'
+                f'<td><span class="lm-signal" style="color:{sig_tc};background:{sig_bg};'
+                f'border:1px solid {sig_tc}40">{sig_lbl}</span></td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table class="lm-port-tbl">'
+            f'<thead><tr>'
+            f'<th>TICKER</th><th>PRICE</th><th>DAY%</th><th>WEEK%</th>'
+            f'<th>RSI</th><th>52W POSITION</th><th>VOL RATIO</th><th>MACD</th>'
+            f'<th>P/E</th><th>BETA</th><th>MKT CAP</th><th>SIGNAL</th>'
+            f'</tr></thead><tbody>{rows_html}</tbody></table></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="lm-panel"><div class="lm-phdr">◎ PORTFOLIO INTELLIGENCE</div>'
+            '<div style="color:#1A5C30;font-family:\'JetBrains Mono\',monospace;font-size:12px;padding:12px 0">'
+            'No history found — run an analysis first and your portfolio tickers will appear here with live signals.'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ── Macro dashboard + Gainers / Losers ────────────────────────────────
+    mac_col, gl_col = st.columns([3, 4])
+
+    with mac_col:
+        # ── Fear & Greed (VIX-based) ───────────────────────────────────────
+        vix_val = idx_data.get("^VIX", {}).get("price", 20)
+        fg = max(0, min(100, int(100 - (vix_val - 10) / 40 * 100)))
+        if fg >= 75:   fg_lbl, fg_c = "EXTREME GREED", "#00FF41"
+        elif fg >= 55: fg_lbl, fg_c = "GREED",         "#00CC33"
+        elif fg >= 45: fg_lbl, fg_c = "NEUTRAL",       "#FFD700"
+        elif fg >= 25: fg_lbl, fg_c = "FEAR",          "#FF5050"
+        else:          fg_lbl, fg_c = "EXTREME FEAR",  "#FF0000"
+        tnx_val = idx_data.get("^TNX", {}).get("price", 4.5)
+        irx_val = idx_data.get("^IRX", {}).get("price", 4.0)
+        spread  = tnx_val - irx_val
+        curve_lbl = "INVERTED" if spread < 0 else "NORMAL"
+        curve_col = "#FF5050" if spread < 0 else "#00FF41"
+        tnx_chg  = idx_data.get("^TNX",    {}).get("pct",   0)
+        oil_pct  = idx_data.get("CL=F",    {}).get("pct",   0)
+        btc_pct  = idx_data.get("BTC-USD", {}).get("pct",   0)
+        gld_pct  = idx_data.get("GLD",     {}).get("pct",   0)
+        dxy_pct  = idx_data.get("DX-Y.NYB",{}).get("pct",   0)
+        oil_px   = idx_data.get("CL=F",    {}).get("price", 0)
+        gld_px   = idx_data.get("GLD",     {}).get("price", 0)
+        btc_px   = idx_data.get("BTC-USD", {}).get("price", 0)
+        dxy_px   = idx_data.get("DX-Y.NYB",{}).get("price", 0)
+
+        st.markdown(
+            f'<div class="lm-panel">'
+            f'<div class="lm-phdr">◎ MACRO DASHBOARD</div>'
+            f'<div style="text-align:center;padding:8px 0 12px;">'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.12em;color:#1A5C30;'
+            f'font-family:\'JetBrains Mono\',monospace;margin-bottom:4px">FEAR &amp; GREED</div>'
+            f'<div style="font-size:44px;font-weight:900;color:{fg_c};line-height:1;'
+            f'font-family:\'JetBrains Mono\',monospace;font-variant-numeric:tabular-nums">{fg}</div>'
+            f'<div style="font-size:11px;font-weight:700;letter-spacing:.1em;color:{fg_c};'
+            f'font-family:\'JetBrains Mono\',monospace;margin-top:4px">{fg_lbl}</div>'
+            f'<div style="background:#001508;border-radius:3px;height:8px;margin:10px 0;overflow:hidden;">'
+            f'<div style="width:{fg}%;height:100%;background:linear-gradient(90deg,#FF3030,#FFD700,#00FF41);'
+            f'border-radius:3px"></div></div>'
+            f'<div style="font-size:9px;color:#1A5C30;font-family:\'JetBrains Mono\',monospace">'
+            f'VIX {vix_val:.2f}  ·  0=MAX FEAR  100=MAX GREED</div>'
+            f'</div>'
+            f'<hr class="lm-divider">'
+            f'<div class="lm-row">'
+            f'<span class="lm-row-lbl">YIELD CURVE</span>'
+            f'<span style="color:{curve_col};font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700">'
+            f'{curve_lbl}  {spread:+.2f}%</span></div>'
+            f'<div class="lm-row"><span class="lm-row-lbl">10Y YIELD</span>'
+            f'<span style="color:{"#FF3030" if tnx_chg>0 else "#00FF41"};font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+            f'{tnx_val:.3f}%  ({tnx_chg:+.2f}%)</span></div>'
+            f'<div class="lm-row"><span class="lm-row-lbl">OIL WTI</span>'
+            f'<span style="color:{"#00FF41" if oil_pct>=0 else "#FF3030"};font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+            f'${oil_px:.2f}  ({oil_pct:+.2f}%)</span></div>'
+            f'<div class="lm-row"><span class="lm-row-lbl">GOLD</span>'
+            f'<span style="color:{"#00FF41" if gld_pct>=0 else "#FF3030"};font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+            f'${gld_px:.2f}  ({gld_pct:+.2f}%)</span></div>'
+            f'<div class="lm-row"><span class="lm-row-lbl">BITCOIN</span>'
+            f'<span style="color:{"#00FF41" if btc_pct>=0 else "#FF3030"};font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+            f'${btc_px:,.0f}  ({btc_pct:+.2f}%)</span></div>'
+            f'<div class="lm-row"><span class="lm-row-lbl">USD INDEX</span>'
+            f'<span style="color:{"#00FF41" if dxy_pct>=0 else "#FF3030"};font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+            f'{dxy_px:.2f}  ({dxy_pct:+.2f}%)</span></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    with gl_col:
+        # ── Top Gainers / Losers ───────────────────────────────────────────
+        gain_h = ""
+        for d in gainers[:6]:
+            tc, _ = _lm_color(d["pct"])
+            sg = "+" if d["pct"] >= 0 else ""
+            gain_h += (
+                f'<div class="lm-row"><span class="lm-row-lbl">{d["ticker"]}'
+                f'<span class="lm-row-sub" style="margin-left:6px">${d["price"]:.2f}</span></span>'
+                f'<span style="color:{tc};font-family:\'JetBrains Mono\',monospace;font-weight:800;font-size:12px">'
+                f'{sg}{d["pct"]:.2f}%</span></div>'
+            )
+        lose_h = ""
+        for d in losers[:6]:
+            tc, _ = _lm_color(d["pct"])
+            sg = "+" if d["pct"] >= 0 else ""
+            lose_h += (
+                f'<div class="lm-row"><span class="lm-row-lbl">{d["ticker"]}'
+                f'<span class="lm-row-sub" style="margin-left:6px">${d["price"]:.2f}</span></span>'
+                f'<span style="color:{tc};font-family:\'JetBrains Mono\',monospace;font-weight:800;font-size:12px">'
+                f'{sg}{d["pct"]:.2f}%</span></div>'
+            )
+        g1, g2 = st.columns(2)
+        with g1:
+            st.markdown(f'<div class="lm-panel"><div class="lm-phdr">▲ TOP GAINERS · 1D</div>{gain_h}</div>', unsafe_allow_html=True)
+        with g2:
+            st.markdown(f'<div class="lm-panel"><div class="lm-phdr">▼ TOP LOSERS · 1D</div>{lose_h}</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ── Forex + Crypto row ─────────────────────────────────────────────────
+    fx_col, cr_col = st.columns(2)
+    with fx_col:
+        fx_pairs = {
+            "EUR":"EUR/USD","GBP":"GBP/USD","JPY":"USD/JPY","CNY":"USD/CNY",
+            "CAD":"USD/CAD","AUD":"AUD/USD","CHF":"CHF","INR":"USD/INR",
+            "KRW":"USD/KRW","MXN":"USD/MXN","BRL":"USD/BRL","SGD":"SGD",
+        }
+        fx_rows = "".join(
+            f'<div class="lm-row"><span class="lm-row-lbl">{v}</span>'
+            f'<span style="color:#CCFFE6;font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700">'
+            f'{forex_data[k]:.4f}</span></div>'
+            for k, v in fx_pairs.items() if k in forex_data
+        )
+        st.markdown(
+            f'<div class="lm-panel"><div class="lm-phdr">⇆ FOREX RATES  ·  USD BASE  ·  ECB DATA</div>{fx_rows}</div>',
+            unsafe_allow_html=True,
+        )
+    with cr_col:
+        cr_rows = ""
+        for sym, d in crypto_data.items():
+            tc, _ = _lm_color(d["chg24"])
+            sg = "+" if d["chg24"] >= 0 else ""
+            pf = f"${d['price']:,.2f}" if d["price"] >= 1 else f"${d['price']:.4f}"
+            mcap_b = d.get("mcap", 0) / 1e9
+            mcap_s = f"${mcap_b:.1f}B" if mcap_b >= 1 else ""
+            cr_rows += (
+                f'<div class="lm-row">'
+                f'<span class="lm-row-lbl">{sym}'
+                f'{"<span class=lm-row-sub style=margin-left:6px>" + mcap_s + "</span>" if mcap_s else ""}'
+                f'</span>'
+                f'<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px">'
+                f'<span style="color:#CCFFE6">{pf}</span>  '
+                f'<span style="color:{tc};font-weight:700">{sg}{d["chg24"]:.2f}%</span>'
+                f'</span></div>'
+            )
+        st.markdown(
+            f'<div class="lm-panel"><div class="lm-phdr">₿ CRYPTO MARKET  ·  24H CHANGE  ·  COINGECKO</div>{cr_rows}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ── 4 live video streams (2×2) + selectors below ──────────────────────
+    stream_keys_body = list(LIVE_MONITOR_STREAMS.keys())
+    def _render_vid_lm(sid):
+        cid  = LIVE_MONITOR_STREAMS.get(sid, "UCIALMKvObZNtJ6AmdCLP7Lg")
+        eurl = (f"https://www.youtube.com/embed/live_stream?channel={cid}"
+                f"&autoplay=1&mute=1&modestbranding=1&rel=0&controls=1")
+        st.markdown(
+            f'<div style="background:#000A04;border:1px solid #002810;border-radius:4px;overflow:hidden">'
+            f'<div style="padding:4px 10px;font-family:\'JetBrains Mono\',monospace;font-size:8px;'
+            f'font-weight:700;color:#1A5C30;text-transform:uppercase;letter-spacing:.1em;'
+            f'border-bottom:1px solid #002010">'
+            f'<span style="color:#00FF41;margin-right:5px">◉</span>{sid.upper()}</div>'
+            f'<iframe src="{eurl}" width="100%" height="290" frameborder="0" '
+            f'allowfullscreen allow="autoplay;encrypted-media;picture-in-picture" '
+            f'style="display:block;background:#000"></iframe>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    _sv1 = st.session_state.get("lm_s1", "Bloomberg TV")
+    _sv2 = st.session_state.get("lm_s2", "CNBC Television")
+    _sv3 = st.session_state.get("lm_s3", "Al Jazeera (World/War)")
+    _sv4 = st.session_state.get("lm_s4", "France 24 English")
+    _vc1, _vc2 = st.columns(2)
+    with _vc1: _render_vid_lm(_sv1)
+    with _vc2: _render_vid_lm(_sv2)
+    st.markdown("<div style='height:5px'></div>", unsafe_allow_html=True)
+    _vc3, _vc4 = st.columns(2)
+    with _vc3: _render_vid_lm(_sv3)
+    with _vc4: _render_vid_lm(_sv4)
+    # Selectors immediately below the videos
+    st.markdown(
+        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;'
+        'letter-spacing:.14em;color:#1A5C30;text-transform:uppercase;margin:10px 0 4px">'
+        '◈ CHANGE STREAM</div>',
+        unsafe_allow_html=True,
+    )
+    _sc1, _sc2, _sc3, _sc4 = st.columns(4)
+    with _sc1: st.selectbox("S1", stream_keys_body, key="lm_s1", label_visibility="collapsed")
+    with _sc2: st.selectbox("S2", stream_keys_body, key="lm_s2", label_visibility="collapsed")
+    with _sc3: st.selectbox("S3", stream_keys_body, key="lm_s3", label_visibility="collapsed")
+    with _sc4: st.selectbox("S4", stream_keys_body, key="lm_s4", label_visibility="collapsed")
+    st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
+
+    # ── Live news — all 18 feeds, filter by source ────────────────────────
+    all_sources = ["ALL SOURCES"] + sorted({a["source"] for a in all_news})
+    n_total     = len(all_news)
+
+    # Header row: source count + filter
+    nh1, nh2 = st.columns([4, 2])
+    with nh1:
+        st.markdown(
+            f'<div style="font-family:\'JetBrains Mono\',monospace;font-size:8.5px;font-weight:700;'
+            f'letter-spacing:.15em;color:#1A5C30;text-transform:uppercase;padding-top:6px">'
+            f'◎ LIVE NEWS AGGREGATOR  ·  {n_total} ARTICLES  ·  '
+            f'{len({a["source"] for a in all_news})} SOURCES  ·  '
+            f'BLOOMBERG · WSJ · CNBC · BBC · GUARDIAN · BUSINESS INSIDER · MARKETWATCH · '
+            f'MOTLEY FOOL · ZERO HEDGE · SEEKING ALPHA · FORTUNE · NPR · KIPLINGER · AXIOS  +MORE'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    with nh2:
+        news_filter = st.selectbox(
+            "Filter source",
+            options=all_sources,
+            index=0,
+            key="lm_news_filter",
+            label_visibility="collapsed",
+        )
+
+    # Apply filter
+    if news_filter == "ALL SOURCES":
+        display_news = all_news
+    else:
+        display_news = [a for a in all_news if a["source"] == news_filter]
+
+    # Build per-article HTML with colored source badge
+    def _art_html(a):
+        import re as _re, html as _html
+        # unescape first (handles feeds that store HTML as &lt;div&gt; entities),
+        # then strip actual tags, then re-escape for safe rendering
+        def _clean(s, maxlen=0):
+            s = _html.unescape(s or "")          # &lt;div&gt; → <div>
+            s = _re.sub(r"<[^>]+>", "", s)       # strip all HTML tags
+            s = _re.sub(r"\s+", " ", s).strip()  # collapse whitespace
+            if maxlen:
+                s = s[:maxlen]
+            return _html.escape(s)               # re-escape for HTML output
+        src   = a.get("source", "")
+        color = a.get("color", "#00FF41")
+        title = _clean(a.get("title", ""))
+        link  = _html.escape(a.get("link", "#") or "#")
+        pub   = _clean(a.get("published", "")[:22])
+        summ  = _clean(a.get("summary", ""), maxlen=180)
+        pub_html  = (f'<span style="color:#0A3018;font-size:8px;margin-left:6px">{pub}</span>' if pub else "")
+        summ_html = (f'<div style="color:#1A5C30;font-size:11px;margin-top:3px;font-family:Inter,sans-serif;line-height:1.4">{summ}</div>' if summ else "")
+        return (
+            f'<div class="lm-news-item">'
+            f'<div class="lm-news-src">'
+            f'<span style="display:inline-block;padding:1px 6px;border-radius:2px;'
+            f'background:{color}18;border:1px solid {color}44;'
+            f'color:{color};font-size:8px;font-weight:700;letter-spacing:.1em;'
+            f'font-family:\'JetBrains Mono\',monospace;text-transform:uppercase">{src}</span>'
+            f'{pub_html}'
+            f'</div>'
+            f'<div class="lm-news-ttl" style="margin-top:4px">'
+            f'<a href="{link}" target="_blank" '
+            f'style="color:#CCFFE6;text-decoration:none;font-size:12.5px;font-weight:500;'
+            f'font-family:\'Inter\',-apple-system,sans-serif;line-height:1.45;">'
+            f'{title}</a></div>'
+            f'{summ_html}'
+            f'</div>'
+        )
+
+    # 3-column grid of articles
+    nc1, nc2, nc3 = st.columns(3)
+    per_col = max(1, len(display_news) // 3)
+    col_arts = [display_news[:per_col], display_news[per_col:2*per_col], display_news[2*per_col:]]
+
+    for col_widget, arts in zip([nc1, nc2, nc3], col_arts):
+        body = "".join(_art_html(a) for a in arts)
+        if not body:
+            body = (
+                '<div style="color:#1A5C30;font-size:11px;padding:12px 0;'
+                'font-family:\'JetBrains Mono\',monospace">No articles for this filter</div>'
+            )
+        col_widget.markdown(f'<div class="lm-panel">{body}</div>', unsafe_allow_html=True)
+
+    # ── Source legend ──────────────────────────────────────────────────────
+    legend_items = "".join(
+        f'<span style="display:inline-block;margin:2px 6px 2px 0;padding:2px 7px;'
+        f'border-radius:2px;background:{color}15;border:1px solid {color}40;'
+        f'color:{color};font-size:8px;font-weight:700;letter-spacing:.1em;'
+        f'font-family:\'JetBrains Mono\',monospace;text-transform:uppercase">{name}</span>'
+        for name, url, color in LIVE_MONITOR_RSS_FEEDS
+    )
+    st.markdown(
+        f'<div style="margin-top:10px;padding:10px 14px;background:#010D05;'
+        f'border:1px solid #002010;border-radius:3px;">'
+        f'<div style="font-size:8px;font-weight:700;letter-spacing:.15em;color:#1A5C30;'
+        f'font-family:\'JetBrains Mono\',monospace;text-transform:uppercase;margin-bottom:8px">'
+        f'ACTIVE SOURCES  ·  {len(LIVE_MONITOR_RSS_FEEDS)} FEEDS  ·  ALL FREE  ·  NO API KEY REQUIRED</div>'
+        f'{legend_items}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Footer ─────────────────────────────────────────────────────────────
+    src_list = " · ".join(f[0].upper() for f in LIVE_MONITOR_RSS_FEEDS[:8]) + "  +MORE"
+    st.markdown(
+        f'<div style="text-align:center;font-family:\'JetBrains Mono\',monospace;'
+        f'font-size:8.5px;color:#003A14;letter-spacing:.1em;text-transform:uppercase;'
+        f'padding:14px 0 4px;border-top:1px solid #001A08;margin-top:16px;">'
+        f'◈ LIVE MONITOR v2  ·  ALL DATA FREE &amp; PUBLIC  ·  '
+        f'YFINANCE · COINGECKO · FRANKFURTER ECB · {src_list}'
+        f'  ·  AUTO-REFRESH 20s  ·  LAST: {now_utc.strftime("%H:%M:%S UTC")}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
 def render_sidebar():
@@ -1191,6 +2317,12 @@ def render_sidebar():
         with col_b3:
             cal_btn  = st.button("Calendar", type="secondary", use_container_width=True)
         settings_btn = st.button("⚙️  Settings", type="secondary", use_container_width=True)
+        live_btn     = st.button(
+            "📡  Live Monitor",
+            type="secondary",
+            use_container_width=True,
+            help="Bloomberg-style live market command centre — indices, sector heatmap, live video, crypto, forex & news.",
+        )
         st.markdown(
             f'<div style="text-align:center;font-size:11px;color:#4B5563;margin-top:12px">'
             f'v{VERSION}</div>',
@@ -1212,7 +2344,7 @@ def render_sidebar():
         existing_tickers  = existing_tickers,
         avoid_recent      = avoid_recent,
     )
-    return profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn
+    return profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn, live_btn
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -5369,13 +6501,16 @@ def tab_settings():
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 def main():
+    # Warm live monitor caches in background so data is ready before first click
+    _lm_preload()
+
     # Load persisted settings once per session
     if "settings" not in st.session_state:
         st.session_state.settings = _load_settings()
 
     _apply_theme_css()
 
-    profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn = render_sidebar()
+    profile, run_btn, hist_btn, bt_btn, cal_btn, settings_btn, live_btn = render_sidebar()
 
     if "results" not in st.session_state:
         st.session_state.results             = None
@@ -5384,6 +6519,7 @@ def main():
         st.session_state.show_backtest       = False
         st.session_state.show_calendar       = False
         st.session_state.show_settings       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.session_state.rankings_selected   = None
         st.session_state.bt_result           = None
@@ -5394,6 +6530,7 @@ def main():
         st.session_state.show_backtest       = False
         st.session_state.show_calendar       = False
         st.session_state.show_settings       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.session_state.bt_result           = None
         with st.spinner("Running analysis…"):
@@ -5406,6 +6543,7 @@ def main():
         st.session_state.show_backtest       = False
         st.session_state.show_calendar       = False
         st.session_state.show_settings       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.rerun()
 
@@ -5414,6 +6552,7 @@ def main():
         st.session_state.show_history        = False
         st.session_state.show_calendar       = False
         st.session_state.show_settings       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.rerun()
 
@@ -5422,6 +6561,7 @@ def main():
         st.session_state.show_history        = False
         st.session_state.show_backtest       = False
         st.session_state.show_settings       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.rerun()
 
@@ -5430,8 +6570,23 @@ def main():
         st.session_state.show_history        = False
         st.session_state.show_backtest       = False
         st.session_state.show_calendar       = False
+        st.session_state.show_live_monitor   = False
         st.session_state.show_session_detail = None
         st.rerun()
+
+    if live_btn:
+        st.session_state.show_live_monitor   = not st.session_state.get("show_live_monitor", False)
+        st.session_state.show_history        = False
+        st.session_state.show_backtest       = False
+        st.session_state.show_calendar       = False
+        st.session_state.show_settings       = False
+        st.session_state.show_session_detail = None
+        st.rerun()
+
+    # ── Live Monitor view ──────────────────────────────────────────────────
+    if st.session_state.get("show_live_monitor", False):
+        tab_live_monitor()
+        return
 
     # ── Settings view ─────────────────────────────────────────────────────
     if st.session_state.get("show_settings", False):

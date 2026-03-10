@@ -645,7 +645,7 @@ Output: Equal-weighted portfolio equity curve vs S&P 500 · Win rate · Portfoli
 
 ---
 
-## Streamlit Dashboard — 10 Tabs
+## Streamlit Dashboard — 10 Tabs + Live Monitor
 
 | Tab | What You Get |
 |-----|-------------|
@@ -660,6 +660,55 @@ Output: Equal-weighted portfolio equity curve vs S&P 500 · Win rate · Portfoli
 | **9. Backtest** | Portfolio-wide equity curve vs S&P 500 · 5 aggregate tiles · per-stock breakdown |
 | **10. Calendar** | Earnings timeline sorted by urgency: ≤7d RED · ≤14d AMBER · ≤30d BLUE · Wall Street-style quant analysis per stock |
 | **⚙️ Settings** | Theme switcher (Terminal / Dark / Light / Warm) · CSV/JSON export · behaviour sliders |
+
+---
+
+## 📡 Live Monitor — Bloomberg Terminal Command Centre
+
+A real-time market intelligence dashboard accessible via the **📡 Live Monitor** button in the sidebar. Caches warm automatically in the background at app launch — data is ready before you even click.
+
+**All data is 100% free. No API keys required.**
+
+### What's Inside
+
+| Panel | Data |
+|-------|------|
+| **Ticker Tape** | Scrolling live prices — your analysis history picks first, then major indices + crypto |
+| **18 Major Indices** | S&P 500 · NASDAQ · Dow · Russell · VIX · 10Y yield · Gold · Bitcoin · WTI Oil · FTSE · Nikkei · Hang Seng · Silver · ETH · DXY · Natural Gas · Copper · 3M yield |
+| **Sector Heatmap** | 10 S&P 500 sector ETFs with 1-day % change and intensity bar |
+| **Portfolio Intelligence** | Every ticker from your analysis history — live price, day%, week%, RSI, 52W position, volume ratio, MACD cross, P/E, beta, market cap, and a 7-factor **BUY/SELL/HOLD signal** |
+| **Fear & Greed Gauge** | VIX-derived 0–100 score with label (Extreme Fear → Extreme Greed) |
+| **Macro Dashboard** | Yield curve (normal/inverted), 10Y yield, WTI oil, gold, bitcoin, USD index |
+| **Top Gainers / Losers** | Best and worst 1-day movers from a 25-stock liquid universe |
+| **4 Live Video Streams** | 2×2 grid of YouTube live news channels — Bloomberg, CNBC, Al Jazeera, France 24 and more. Select any of 10 channels from dropdowns |
+| **Forex Rates** | 12 currency pairs vs USD — EUR, GBP, JPY, CNY, CAD, AUD, CHF, INR, KRW, MXN, BRL, SGD (ECB Frankfurter API) |
+| **Crypto Market** | 20+ coins — price, 24h change, market cap (CoinGecko free API) |
+| **Live News Aggregator** | 18 RSS feeds — Bloomberg · WSJ · CNBC (×3) · BBC · Guardian · Business Insider · MarketWatch · Motley Fool · Seeking Alpha · Zero Hedge · Investing.com · Fortune · NPR · Kiplinger · Axios — deduplicated, source-filtered, with full HTML entity cleaning |
+
+### Buy/Sell Signal Engine
+
+Each portfolio position is scored on 7 real-time factors:
+
+| Factor | Bullish | Bearish |
+|--------|---------|---------|
+| RSI | < 35 (oversold) | > 70 (overbought) |
+| MACD crossover | Bullish cross | Bearish cross |
+| Day change | > +3% | < −3% |
+| Volume ratio | > 1.8× on up day | > 1.8× on down day |
+| 52-week position | Bottom 12% | Top 12% |
+| 1-week trend | > +4% | < −4% |
+
+Signals: **STRONG BUY** · **BUY** · **WATCH** · **HOLD** · **SELL** · **STRONG SELL**
+
+### Data Sources (Live Monitor only)
+
+| Source | Used for | Key required |
+|--------|----------|-------------|
+| **yfinance** | Indices, sector ETFs, portfolio stock data | None |
+| **CoinGecko API** | 20+ crypto prices and 24h change | None |
+| **Frankfurter ECB** | 12 forex pairs vs USD | None |
+| **18 RSS feeds** | Live news from Bloomberg, WSJ, CNBC, BBC, Guardian, and more | None |
+| **YouTube embeds** | 4 simultaneous live news streams | None |
 
 ---
 

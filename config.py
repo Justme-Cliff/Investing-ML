@@ -64,6 +64,68 @@ SECTOR_ETFS = {
     "Communication": "XLC",
 }
 
+# ── Live Monitor ─────────────────────────────────────────────────────────────
+# YouTube channel IDs for live financial/news streams.
+# Embedded via: https://www.youtube.com/embed/live_stream?channel=CHANNEL_ID
+# To find a channel ID: go to the channel on YouTube → view page source →
+# search for "channelId" — or use https://commentpicker.com/youtube-channel-id.php
+LIVE_MONITOR_STREAMS = {
+    "Bloomberg TV":            "UCIALMKvObZNtJ6AmdCLP7Lg",  # bloomberg.com/live
+    "Yahoo Finance Live":      "UCEAZeUIeJs0IjQiqTCdVSIg",  # market-hours only (not 24/7)
+    "CNBC Television":         "UCvJJ_dzjViJCoLf5uKUTwoA",  # cnbc.com/live-tv
+    "Fox Business":            "UCF3Bml4CdMTHiQEQFfRqojQ",  # foxbusiness.com/live
+    "Reuters":                 "UCiU7PQr2DWzXodEMdTR_37w",  # reuters.com
+    "Al Jazeera (World/War)":  "UCNye-wNBqNL5ZzHSJj3l8Bg",  # aljazeera.com/live
+    "Sky News":                "UCoMdktPbSTixAyNGwb-UYkQ",  # blocks embeds on some streams
+    "WION Live":               "UCeIjPtFHhYJKXPFkFnYrC0w",  # wion.com/live-tv
+    "DW News":                 "UCknLrEdhRCp1aegoMqRaCZg",  # dw.com/en/live-tv
+    "France 24 English":       "UCQfwfsi5VrQ8yKZ-UWmAEFg",  # france24.com/en/live
+}
+
+# Free RSS feeds — verified working (tested 2025-03).
+# All fetched via requests + feedparser with a browser User-Agent (bypasses bot blocks).
+# Format: (display_name, url, hex_badge_color)
+# ── How to find RSS feeds ──────────────────────────────────────────────────────
+# Yahoo Finance:     finance.yahoo.com/rss/ → many topic feeds
+# Bloomberg:         feeds.bloomberg.com/markets/news.rss (public)
+# WSJ:               feeds.a.dj.com/rss/RSSMarketsMain.xml (public)
+# CNBC:              www.cnbc.com/rss-feeds/ (many category feeds)
+# BBC:               www.bbc.co.uk/news/10628494 (RSS index)
+# Guardian:          www.theguardian.com/help/feeds (topic feeds)
+# NPR:               feeds.npr.org/ + topic ID
+# Axios:             api.axios.com/feed/
+# Seeking Alpha:     seekingalpha.com/market_currents.xml
+# Investing.com:     www.investing.com/rss/news.rss
+# MarketWatch:       feeds.content.dowjones.io/public/rss/mw_topstories
+LIVE_MONITOR_RSS_FEEDS = [
+    # (name, url, badge_color)
+    ("Bloomberg",         "https://feeds.bloomberg.com/markets/news.rss",                         "#FFD700"),
+    ("Yahoo Finance",     "https://finance.yahoo.com/rss/topstories",                              "#7B2FF7"),
+    ("WSJ Markets",       "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",                        "#00B4D8"),
+    ("CNBC Top News",     "https://www.cnbc.com/id/100727362/device/rss/rss.html",                "#0080FF"),
+    ("CNBC Finance",      "https://www.cnbc.com/id/10000664/device/rss/rss.html",                 "#3399FF"),
+    ("CNBC Economy",      "https://www.cnbc.com/id/20910258/device/rss/rss.html",                 "#66AAFF"),
+    ("BBC Business",      "https://feeds.bbci.co.uk/news/business/rss.xml",                       "#FF5050"),
+    ("Guardian Biz",      "https://www.theguardian.com/business/rss",                             "#00CC66"),
+    ("Business Insider",  "https://feeds.businessinsider.com/custom/all",                         "#FF8C00"),
+    ("MarketWatch",       "https://feeds.content.dowjones.io/public/rss/mw_topstories",           "#00FF41"),
+    ("Motley Fool",       "https://www.fool.com/feeds/index.aspx",                                "#FF44AA"),
+    ("Seeking Alpha",     "https://seekingalpha.com/market_currents.xml",                         "#44DDFF"),
+    ("Zero Hedge",        "https://feeds.feedburner.com/zerohedge/feed",                          "#FF3030"),
+    ("Investing.com",     "https://www.investing.com/rss/news.rss",                               "#FF6600"),
+    ("Fortune",           "https://fortune.com/feed/",                                            "#CC99FF"),
+    ("NPR Business",      "https://feeds.npr.org/1006/rss.xml",                                   "#66FFCC"),
+    ("Kiplinger",         "https://www.kiplinger.com/feeds/rss.xml",                              "#FFCC44"),
+    ("Axios Finance",     "https://api.axios.com/feed/",                                          "#44FF99"),
+]
+
+# Tickers tracked in the Live Monitor top-movers panel (free via yfinance)
+LIVE_MONITOR_MOVERS_TICKERS = [
+    "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AMD",
+    "NFLX", "CRM", "JPM", "BAC", "GS", "V", "MA", "XOM", "CVX",
+    "LLY", "UNH", "JNJ", "PLTR", "COIN", "HOOD", "MSTR", "SOFI",
+]
+
 # ── Stock universe: ~300 liquid stocks across 10 sectors ─────────────────────
 STOCK_UNIVERSE = {
     "Technology": [
