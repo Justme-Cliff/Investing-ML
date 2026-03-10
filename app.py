@@ -1666,7 +1666,7 @@ def tab_live_monitor():
     # ── Initialise session state for stream selections (first visit only) ───
     stream_keys = list(LIVE_MONITOR_STREAMS.keys())
     _stream_defaults = {
-        "lm_s1": "Bloomberg TV",
+        "lm_s1": "Bloomberg Quicktake",
         "lm_s2": "CNBC Television",
         "lm_s3": "Al Jazeera (World/War)",
         "lm_s4": "France 24 English",
@@ -1682,6 +1682,30 @@ def tab_live_monitor():
                                   help="Force-refresh all data")
 
     _lm_live_body(force_refresh)
+
+
+@st.fragment
+def _vid_slot(slot_key: str, default: str, stream_keys: list):
+    """Isolated video + selector fragment — reruns only itself when selector changes."""
+    val = st.session_state.get(slot_key, default)
+    cid = LIVE_MONITOR_STREAMS.get(val, "UCIALMKvObZNtJ6AmdCLP7Lg")
+    eurl = (
+        f"https://www.youtube.com/embed/live_stream?channel={cid}"
+        f"&autoplay=1&mute=1&modestbranding=1&rel=0&controls=1"
+    )
+    st.markdown(
+        f'<div style="background:#000A04;border:1px solid #002810;border-radius:4px;overflow:hidden">'
+        f'<div style="padding:4px 10px;font-family:\'JetBrains Mono\',monospace;font-size:8px;'
+        f'font-weight:700;color:#1A5C30;text-transform:uppercase;letter-spacing:.1em;'
+        f'border-bottom:1px solid #002010">'
+        f'<span style="color:#00FF41;margin-right:5px">◉</span>{val.upper()}</div>'
+        f'<iframe src="{eurl}" width="100%" height="290" frameborder="0" '
+        f'allowfullscreen allow="autoplay;encrypted-media;picture-in-picture" '
+        f'style="display:block;background:#000"></iframe>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    st.selectbox("", stream_keys, key=slot_key, label_visibility="collapsed")
 
 
 def _lm_live_body(force_refresh: bool = False):
@@ -2090,47 +2114,16 @@ def _lm_live_body(force_refresh: bool = False):
 
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
-    # ── 4 live video streams (2×2) + selectors below ──────────────────────
+    # ── 4 live video streams (2×2) — each slot is an isolated fragment ────
+    # Changing one selector reruns only that fragment; other 3 keep playing.
     stream_keys_body = list(LIVE_MONITOR_STREAMS.keys())
-    def _render_vid_lm(sid):
-        cid  = LIVE_MONITOR_STREAMS.get(sid, "UCIALMKvObZNtJ6AmdCLP7Lg")
-        eurl = (f"https://www.youtube.com/embed/live_stream?channel={cid}"
-                f"&autoplay=1&mute=1&modestbranding=1&rel=0&controls=1")
-        st.markdown(
-            f'<div style="background:#000A04;border:1px solid #002810;border-radius:4px;overflow:hidden">'
-            f'<div style="padding:4px 10px;font-family:\'JetBrains Mono\',monospace;font-size:8px;'
-            f'font-weight:700;color:#1A5C30;text-transform:uppercase;letter-spacing:.1em;'
-            f'border-bottom:1px solid #002010">'
-            f'<span style="color:#00FF41;margin-right:5px">◉</span>{sid.upper()}</div>'
-            f'<iframe src="{eurl}" width="100%" height="290" frameborder="0" '
-            f'allowfullscreen allow="autoplay;encrypted-media;picture-in-picture" '
-            f'style="display:block;background:#000"></iframe>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-    _sv1 = st.session_state.get("lm_s1", "Bloomberg TV")
-    _sv2 = st.session_state.get("lm_s2", "CNBC Television")
-    _sv3 = st.session_state.get("lm_s3", "Al Jazeera (World/War)")
-    _sv4 = st.session_state.get("lm_s4", "France 24 English")
     _vc1, _vc2 = st.columns(2)
-    with _vc1: _render_vid_lm(_sv1)
-    with _vc2: _render_vid_lm(_sv2)
+    with _vc1: _vid_slot("lm_s1", "Bloomberg Quicktake", stream_keys_body)
+    with _vc2: _vid_slot("lm_s2", "CNBC Television", stream_keys_body)
     st.markdown("<div style='height:5px'></div>", unsafe_allow_html=True)
     _vc3, _vc4 = st.columns(2)
-    with _vc3: _render_vid_lm(_sv3)
-    with _vc4: _render_vid_lm(_sv4)
-    # Selectors immediately below the videos
-    st.markdown(
-        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;'
-        'letter-spacing:.14em;color:#1A5C30;text-transform:uppercase;margin:10px 0 4px">'
-        '◈ CHANGE STREAM</div>',
-        unsafe_allow_html=True,
-    )
-    _sc1, _sc2, _sc3, _sc4 = st.columns(4)
-    with _sc1: st.selectbox("S1", stream_keys_body, key="lm_s1", label_visibility="collapsed")
-    with _sc2: st.selectbox("S2", stream_keys_body, key="lm_s2", label_visibility="collapsed")
-    with _sc3: st.selectbox("S3", stream_keys_body, key="lm_s3", label_visibility="collapsed")
-    with _sc4: st.selectbox("S4", stream_keys_body, key="lm_s4", label_visibility="collapsed")
+    with _vc3: _vid_slot("lm_s3", "Al Jazeera (World/War)", stream_keys_body)
+    with _vc4: _vid_slot("lm_s4", "France 24 English", stream_keys_body)
     st.markdown("<div style='height:16px'></div>", unsafe_allow_html=True)
 
     # ── Live news — all 18 feeds, filter by source ────────────────────────

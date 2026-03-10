@@ -70,7 +70,7 @@ SECTOR_ETFS = {
 # To find a channel ID: go to the channel on YouTube → view page source →
 # search for "channelId" — or use https://commentpicker.com/youtube-channel-id.php
 LIVE_MONITOR_STREAMS = {
-    "Bloomberg TV":            "UCIALMKvObZNtJ6AmdCLP7Lg",  # bloomberg.com/live
+    "Bloomberg Quicktake":     "UChirEOpgFCupRAk5etXqPaA",  # Bloomberg's digital streaming channel (embed-friendly)
     "Yahoo Finance Live":      "UCEAZeUIeJs0IjQiqTCdVSIg",  # market-hours only (not 24/7)
     "CNBC Television":         "UCvJJ_dzjViJCoLf5uKUTwoA",  # cnbc.com/live-tv
     "Fox Business":            "UCF3Bml4CdMTHiQEQFfRqojQ",  # foxbusiness.com/live
@@ -80,6 +80,7 @@ LIVE_MONITOR_STREAMS = {
     "WION Live":               "UCeIjPtFHhYJKXPFkFnYrC0w",  # wion.com/live-tv
     "DW News":                 "UCknLrEdhRCp1aegoMqRaCZg",  # dw.com/en/live-tv
     "France 24 English":       "UCQfwfsi5VrQ8yKZ-UWmAEFg",  # france24.com/en/live
+    # NOTE: "Bloomberg TV" (UCIALMKvObZNtJ6AmdCLP7Lg) blocks iframe embedding from external sites
 }
 
 # Free RSS feeds — verified working (tested 2025-03).
