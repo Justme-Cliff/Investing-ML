@@ -710,6 +710,20 @@ Signals: **STRONG BUY** · **BUY** · **WATCH** · **HOLD** · **SELL** · **STR
 | **18 RSS feeds** | Live news from Bloomberg, WSJ, CNBC, BBC, Guardian, and more | None |
 | **YouTube embeds** | 4 simultaneous live news streams | None |
 
+### Screenshots
+
+![Live Monitor 1](images/live-monitor1.jpg)
+*Live Monitor — real-time market indices, sector ETF performance, and portfolio positions with buy/sell signals*
+
+![Live Monitor 2](images/live-monitor2.jpg)
+*Crypto dashboard — 20+ live cryptocurrency prices with 24h change*
+
+![Live Monitor 3](images/live-monitor3.jpg)
+*Forex tracker — 12 live currency pairs vs USD and live news feed*
+
+![Live Monitor 4](images/live-monitor4.jpg)
+*Live news streams — 4 simultaneous Bloomberg/CNBC/WSJ feeds*
+
 ---
 
 ## CLI Slash Commands
