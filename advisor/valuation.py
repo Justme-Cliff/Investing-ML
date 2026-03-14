@@ -50,7 +50,7 @@ SIGNAL_LABELS = {
 
 class ValuationEngine:
     """
-    Computes intrinsic value via 4 independent methods then synthesises
+    Computes intrinsic value via 5 independent methods then synthesises
     a buy zone, price target, stop loss, and risk/reward ratio.
     """
 

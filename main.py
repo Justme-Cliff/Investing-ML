@@ -1,5 +1,5 @@
 """
-main.py — Entry point for the Stock Ranking Advisor v3
+main.py — Entry point for the Stock Ranking Advisor v7.2.0
 
 Pure quantitative analysis — no paid AI APIs required.
 Uses hedge-fund grade math: DCF, Graham, EV/EBITDA, FCF yield,
@@ -152,12 +152,14 @@ def main():
         adjusted_w = [w / total for w in adjusted_w]
         mask = ranked_df["sector"] == sector
         score_cols = [f"{f}_score" for f in factor_names_local]
-        available  = [c for c in score_cols if c in ranked_df.columns]
-        if len(available) == len(factor_names_local):
+        available_idx = [i for i, c in enumerate(score_cols) if c in ranked_df.columns]
+        if available_idx:
             adj_composite = sum(
                 adjusted_w[i] * ranked_df.loc[mask, score_cols[i]]
-                for i in range(len(factor_names_local))
+                for i in available_idx
             )
+            weight_sum = sum(adjusted_w[i] for i in available_idx) or 1.0
+            adj_composite = adj_composite / weight_sum
             ranked_df.loc[mask, "composite_score"] = (
                 ranked_df.loc[mask, "composite_score"] * 0.6 + adj_composite * 0.4
             ).clip(0, 100)

@@ -3,7 +3,7 @@
 import os
 from dotenv import load_dotenv
 
-VERSION = "7.1.0"   # Major.Minor.Patch — bump on each release
+VERSION = "7.2.0"   # Major.Minor.Patch — bump on each release
 
 # Load .env from the project root (silently ignored if the file doesn't exist)
 load_dotenv()

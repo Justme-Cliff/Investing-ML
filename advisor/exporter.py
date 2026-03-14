@@ -1,4 +1,4 @@
-# advisor/exporter.py — Export results to Book1.xlsx (5 sheets, formatted)
+# advisor/exporter.py — Export results to Book1.xlsx (6 sheets, formatted)
 
 import os
 from datetime import datetime
@@ -20,9 +20,7 @@ LOW_FILL  = "6E2323"   # red — low
 try:
     import openpyxl
     from openpyxl import load_workbook, Workbook
-    from openpyxl.styles import (
-        PatternFill, Font, Alignment, Border, Side, numbers
-    )
+    from openpyxl.styles import PatternFill, Font, Alignment
     from openpyxl.utils import get_column_letter
     from openpyxl.formatting.rule import ColorScaleRule
     _OPENPYXL = True

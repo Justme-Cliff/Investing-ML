@@ -1,4 +1,4 @@
-# advisor/charts.py — 4 dark-theme matplotlib charts
+# advisor/charts.py — 6 dark-theme matplotlib charts
 
 import os
 import math
@@ -125,7 +125,7 @@ class ChartEngine:
         fig.patch.set_facecolor(BG_DARK)
         _dark_axes(ax)
 
-        cmap       = plt.cm.get_cmap("tab10")
+        cmap       = plt.colormaps["tab10"]
         start_date = None
 
         if self.sp500 is not None and len(self.sp500) > 0:
@@ -268,7 +268,7 @@ class ChartEngine:
             y_pos      = np.arange(len(sectors))
             ax3.barh(y_pos, returns, color=colors, edgecolor=BORDER, height=0.6)
             ax3.set_yticks(y_pos)
-            ax3.set_yticklabels([SECTOR_COLORS.get(s, s)[:3] + " " + s[:10]
+            ax3.set_yticklabels([s[:3].upper() + " " + s[:10]
                                  for s in sectors], color=TXT_WHITE, fontsize=7)
             ax3.axvline(0, color="#555", linewidth=0.8)
             ax3.set_title("Sector ETF 3-Month Returns", color=TXT_WHITE, fontsize=10)
@@ -732,7 +732,7 @@ class ChartEngine:
             "chart2_performance.png",
             "chart3_factor_heatmap.png",
             "chart4_macro_dashboard.png",
-            "chart5_ai_protocol.png",        # NEW: thought process
+            "chart5_quant_protocol.png",
         ]
         for fig, name in zip(figs, names):
             try:

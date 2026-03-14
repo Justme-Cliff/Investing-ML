@@ -1,4 +1,4 @@
-# advisor/collector.py — UserProfile dataclass + enhanced 7-question InputCollector
+# advisor/collector.py — UserProfile dataclass + enhanced 8-question InputCollector
 
 from dataclasses import dataclass, field
 from typing import List, Tuple
@@ -39,7 +39,7 @@ def _sep(title: str = ""):
 
 
 class InputCollector:
-    """Interactively collects 7 profile questions and returns a UserProfile."""
+    """Interactively collects 8 profile questions and returns a UserProfile."""
 
     ALL_SECTORS = list(STOCK_UNIVERSE.keys())
 

@@ -1,4 +1,4 @@
-# Stock Ranking Advisor v7.1.0
+# Stock Ranking Advisor v7.2.0
 
 [![Live App](https://img.shields.io/badge/Live%20App-investing--ml.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)](https://investing-ml.streamlit.app/)
 

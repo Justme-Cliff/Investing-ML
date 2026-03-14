@@ -1,6 +1,6 @@
 # advisor/scorer.py — Enhanced 7-factor MultiFactorScorer
 """
-Each of the 7 factors is significantly upgraded from v1:
+Each of the 7 factors is fully independent and normalised 0–100:
 
   1. Momentum   — 12-1 skip-month (academic grade) + 3/6-month blend
   2. Volatility — annualised std dev (inverted: low vol = high score)

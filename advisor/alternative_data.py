@@ -445,7 +445,7 @@ def enrich_top_n(
 
     top_tickers = ranked_df.head(n)["ticker"].tolist()
     total = len(top_tickers)
-    print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · AV · FMP · SEC · Smart Money)...")
+    print(f"\n  Enriching top {total} stocks with Tier 2 data (options · trends · reddit · AV · FMP · SEC · Smart Money)...")
 
     # Failure tracking — warn if >50% of tickers fail for a source
     _source_failures = {"options": 0, "trends": 0, "reddit": 0, "av": 0,

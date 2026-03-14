@@ -1,4 +1,4 @@
-# advisor/learner.py — Enhanced learning engine v2
+# advisor/learner.py — Enhanced learning engine
 """
 Six stacked learning layers that compound across every session you ever run:
 

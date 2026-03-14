@@ -413,7 +413,7 @@ class CommandHandler:
             return
 
         est = val.get("estimates", {})
-        t = Table(title="Valuation  (4 methods)", box=box.SIMPLE_HEAVY,
+        t = Table(title="Valuation  (5 methods)", box=box.SIMPLE_HEAVY,
                   show_header=True, header_style="bold dim")
         t.add_column("Method",     style="dim",        min_width=14)
         t.add_column("Estimate",   style="cyan",       justify="right")
@@ -421,10 +421,11 @@ class CommandHandler:
 
         price = info.get("currentPrice") or info.get("regularMarketPrice") or 0
         methods = [
-            ("DCF (2-stage)",   est.get("dcf")),
-            ("Graham Number",   est.get("graham")),
-            ("EV/EBITDA target",est.get("ev_ebitda")),
-            ("FCF Yield @4.5%", est.get("fcf_yield")),
+            ("DCF (2-stage)",      est.get("dcf")),
+            ("Graham Number",      est.get("graham")),
+            ("EV/EBITDA target",   est.get("ev_ebitda")),
+            ("FCF Yield (dynamic)", est.get("fcf_yield")),
+            ("EPV (Greenwald)",    est.get("epv")),
         ]
         for method, est_price in methods:
             if est_price is None:
@@ -495,12 +496,12 @@ class CommandHandler:
 
         _CONSOLE.print(
             f"\n  [bold]Risk Profile[/bold]\n"
-            f"  Altman Z [cyan]{_fmt(az.get('score'),'2f')}[/cyan]"
+            f"  Altman Z [cyan]{_fmt(az.get('score'),'.2f')}[/cyan]"
             f" [{_zone_color(az.get('zone',''))}]{az.get('zone','—')}[/{_zone_color(az.get('zone',''))}]"
-            f"  ·  Sharpe [cyan]{_fmt(r.get('sharpe'),'2f')}[/cyan]"
-            f"  ·  Sortino [cyan]{_fmt(r.get('sortino'),'2f')}[/cyan]\n"
-            f"  Max DD [red]{_fmt(r.get('max_drawdown_pct'),'1f')}%[/red]"
-            f"  ·  VaR(95%) [yellow]{_fmt(r.get('var_95_pct'),'1f')}%[/yellow]"
+            f"  ·  Sharpe [cyan]{_fmt(r.get('sharpe'),'.2f')}[/cyan]"
+            f"  ·  Sortino [cyan]{_fmt(r.get('sortino'),'.2f')}[/cyan]\n"
+            f"  Max DD [red]{_fmt(r.get('max_drawdown_pct'),'.1f')}%[/red]"
+            f"  ·  VaR(95%) [yellow]{_fmt(r.get('var_95_pct'),'.1f')}%[/yellow]"
             f"  ·  ROIC/WACC [cyan]{_fmt(rw.get('spread'),'+.1f')}%[/cyan]"
             f" [dim]{rw.get('verdict','—')}[/dim]\n"
             f"  Piotroski [bold]{pf.get('score','—')}/9[/bold]"

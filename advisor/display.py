@@ -3,7 +3,7 @@
 from typing import List, Optional
 import pandas as pd
 
-from config import FACTOR_NAMES, HORIZON_LABELS
+from config import FACTOR_NAMES, HORIZON_LABELS, PORTFOLIO_N
 from advisor.collector import UserProfile
 
 
@@ -66,7 +66,7 @@ class TerminalDisplay:
     def show_results(self, top10: pd.DataFrame):
         W = 96
         _p("\n" + "═" * W)
-        _p("  TOP 10 STOCKS FOR YOUR PROFILE")
+        _p(f"  TOP {PORTFOLIO_N} STOCKS FOR YOUR PROFILE")
         _p("═" * W)
         hdr = (f"  {'#':<4} {'Ticker':<7} {'Sector':<14} {'Score':>6}"
                f" {'Mom':>6} {'Vol':>6} {'Val':>6} {'Qual':>6}"
@@ -165,7 +165,8 @@ class TerminalDisplay:
                 "dcf":       "DCF (2-stage)",
                 "graham":    "Graham Number",
                 "ev_ebitda": "EV/EBITDA",
-                "fcf_yield": "FCF Yield @4.5%",
+                "fcf_yield": "FCF Yield (dynamic)",
+                "epv":       "EPV (Greenwald)",
             }
             if estimates:
                 _p(f"  ┌── VALUATION  ({n_methods} independent method{'s' if n_methods != 1 else ''})")

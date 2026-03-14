@@ -1,5 +1,5 @@
 """
-app.py — Streamlit dashboard for Stock Ranking Advisor v3
+app.py — Streamlit dashboard for Stock Ranking Advisor v7.2.0
 
 Run:  streamlit run app.py
 """
@@ -123,7 +123,7 @@ _SETTINGS_SCHEMA = {
     "fresh_penalty": (float, lambda v: 0 <= v <= 50,                           FRESH_PICKS_PENALTY),
     "n_sessions":    (int,   lambda v: 1 <= v <= 10,                            2),
     "learning_rate": (float, lambda v: 0.001 <= v <= 0.5,                       0.04),
-    "signal_mode":   (str,   lambda v: v in ("Balanced", "Value", "Momentum"),  "Balanced"),
+    "signal_mode":   (str,   lambda v: v in ("Conservative", "Balanced", "Aggressive"),  "Balanced"),
 }
 
 
@@ -522,6 +522,110 @@ html, body, [class*="css"] {
 /* ── Sidebar brand ───────────────────────────────────────────────────── */
 .sb-brand { font-size: 15px; font-weight: 800; color: #E2E8F0; letter-spacing: -.02em; }
 .sb-brand-sub { font-size: 11px; color: #64748B; margin-top: 2px; margin-bottom: 16px; }
+
+/* ── Tables: always horizontally scrollable ──────────────────────────── */
+.qt {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.qt th, .qt td { white-space: nowrap; }
+
+/* ── Tabs: swipeable on narrow viewports ─────────────────────────────── */
+.stTabs [data-baseweb="tab-list"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+}
+.stTabs [data-baseweb="tab-list"]::-webkit-scrollbar { display: none; }
+
+/* ── Responsive: Small laptop / large tablet (≤1024px) ───────────────── */
+@media (max-width: 1024px) {
+    .main .block-container {
+        max-width: 100% !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    .hero { padding: 52px 20px 40px; }
+    .hero-title { font-size: 40px; }
+    .hero-sub { font-size: 15px; }
+    .stTabs [data-baseweb="tab"] { padding: 9px 18px; font-size: 12px; }
+    .mtile-val { font-size: 19px; }
+    .ptitle { font-size: 20px; }
+    .shdr { font-size: 13px; }
+}
+
+/* ── Responsive: Tablet / large phone (≤768px) ───────────────────────── */
+@media (max-width: 768px) {
+    .main .block-container {
+        max-width: 100% !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1rem !important;
+    }
+    /* Hero */
+    .hero { padding: 36px 12px 28px; }
+    .hero-title { font-size: 30px; letter-spacing: -.03em; line-height: 1.1; }
+    .hero-sub { font-size: 14px; max-width: 100%; margin-bottom: 24px; }
+    .hero-note { font-size: 11px; padding: 7px 14px; }
+    /* Tabs */
+    .stTabs [data-baseweb="tab"] { padding: 8px 12px; font-size: 11px; }
+    /* Cards & tiles */
+    .mtile { padding: 12px 14px; border-radius: 8px; }
+    .mtile-val { font-size: 17px; }
+    .mtile-lbl { font-size: 9.5px; margin-bottom: 6px; }
+    .mtile-sub { font-size: 10px; margin-top: 4px; }
+    .pick-card { padding: 14px 16px; border-radius: 8px; }
+    .feature-card { padding: 14px 16px; border-radius: 8px; }
+    .fc-title { font-size: 13px; }
+    .fc-desc { font-size: 11px; }
+    /* Tables */
+    .qt { font-size: 11.5px; }
+    .qt th { font-size: 9px; padding: 8px 10px; }
+    .qt td { padding: 8px 10px; }
+    /* Typography */
+    .shdr { font-size: 13px; }
+    .ssub { font-size: 10.5px; margin-bottom: 10px; }
+    .ptitle { font-size: 17px; }
+    .psub { font-size: 11px; }
+    /* Badges & rank */
+    .badge { font-size: 9px; padding: 2px 6px; }
+    .rank { width: 20px; height: 20px; font-size: 9px; border-radius: 5px; }
+    /* Sidebar */
+    .sb-brand { font-size: 13px; }
+    [data-testid="stSidebar"] label { font-size: 11px !important; }
+    /* Disable hover lifts on touch screens */
+    .pick-card:hover { transform: none; }
+    .feature-card:hover { transform: none; }
+    .mtile:hover { transform: none; }
+}
+
+/* ── Responsive: Small phone (≤480px) ───────────────────────────────── */
+@media (max-width: 480px) {
+    .main .block-container {
+        padding-left: 0.6rem !important;
+        padding-right: 0.6rem !important;
+    }
+    .hero { padding: 28px 8px 20px; }
+    .hero-title { font-size: 24px; }
+    .hero-sub { font-size: 13px; }
+    .hero-note { display: none; }
+    .stTabs [data-baseweb="tab"] { padding: 7px 8px; font-size: 10px; letter-spacing: 0; }
+    .stTabs [data-baseweb="tab-list"] { margin-bottom: 16px; }
+    .mtile { padding: 10px 11px; }
+    .mtile-val { font-size: 15px; }
+    .pick-card { padding: 11px 12px; }
+    .feature-card { padding: 11px 12px; }
+    .qt { font-size: 10.5px; }
+    .qt th { font-size: 8.5px; padding: 6px 8px; letter-spacing: .04em; }
+    .qt td { padding: 7px 8px; }
+    .ptitle { font-size: 15px; }
+    .shdr { font-size: 12px; }
+    .ssub { font-size: 10px; }
+    .badge { font-size: 8.5px; padding: 2px 5px; }
+    .rank { width: 18px; height: 18px; font-size: 8.5px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1614,6 +1718,33 @@ _LM_CSS = """
 .lm-divider {
     border:none; border-top:1px solid #001A08; margin:12px 0;
 }
+
+/* ── Live Monitor: tables always scrollable ──────────────────────────── */
+.lm-port-tbl { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+
+/* ── Live Monitor: responsive ────────────────────────────────────────── */
+@media (max-width: 768px) {
+    .lm-tape { font-size:10px; animation-duration:50s; }
+    .lm-idx-val { font-size:15px; }
+    .lm-idx-lbl { font-size:7.5px; }
+    .lm-idx-chg { font-size:10px; }
+    .lm-port-tbl { font-size:10px; }
+    .lm-port-tbl th { font-size:7px; padding:5px 6px; }
+    .lm-port-tbl td { padding:6px 6px; }
+    .lm-panel { padding:10px; }
+    .lm-hdr-bar { padding:7px 12px; font-size:10px; gap:12px; flex-wrap:wrap; }
+    .lm-row { font-size:10.5px; }
+    .lm-news-ttl { font-size:11px; }
+    .lm-sec-pct { font-size:11px; }
+}
+@media (max-width: 480px) {
+    .lm-tape { font-size:9px; }
+    .lm-idx { padding:8px 9px; min-height:68px; }
+    .lm-idx-val { font-size:13px; }
+    .lm-port-tbl { font-size:9.5px; }
+    .lm-hdr-bar { font-size:9px; gap:8px; padding:6px 10px; }
+    .lm-news-ttl { font-size:10px; }
+}
 </style>
 """
 
@@ -2358,7 +2489,7 @@ def render_welcome():
 
     features = [
         ("#2563EB", "01", "7-Factor Scoring",   "12-1 momentum · EV/EBITDA value · Novy-Marx quality · technicals"),
-        ("#059669", "02", "4-Method Valuation",  "DCF (2-stage) · Graham Number · EV/EBITDA target · FCF yield"),
+        ("#059669", "02", "5-Method Valuation",  "DCF (2-stage) · Graham Number · EV/EBITDA · FCF yield · EPV Greenwald"),
         ("#D97706", "03", "Full Risk Suite",     "Altman Z · Sharpe · Sortino · Max DD · VaR 95% · ROIC/WACC"),
         ("#7C3AED", "04", "7-Gate Protocol",     "Warren Buffett quality screen — every stock must earn its place"),
     ]
@@ -2648,7 +2779,7 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
 def tab_valuation(top10, valuation):
     st.markdown(
         shdr("Multi-Method Valuation Matrix",
-             "4 independent methods · Fair value = median · Entry zone = 80–90% of FV · Stop loss = entry −8%"),
+             "5 independent methods · Fair value = median · Entry zone = 80–90% of FV · Stop loss = entry −8%"),
         unsafe_allow_html=True,
     )
 
@@ -2668,6 +2799,7 @@ def tab_valuation(top10, valuation):
             f'<td style="font-family:monospace">{fmt_price(est.get("graham"))}</td>'
             f'<td style="font-family:monospace">{fmt_price(est.get("ev_ebitda"))}</td>'
             f'<td style="font-family:monospace">{fmt_price(est.get("fcf_yield"))}</td>'
+            f'<td style="font-family:monospace">{fmt_price(est.get("epv"))}</td>'
             f'<td style="font-family:monospace;font-weight:700">{fmt_price(val.get("fair_value"))}</td>'
             f'<td style="font-family:monospace;color:{GREEN};font-weight:600">{fmt_price(val.get("entry_low"))}</td>'
             f'<td style="font-family:monospace;color:{MUTED}">{fmt_price(val.get("entry_high"))}</td>'
@@ -2680,7 +2812,7 @@ def tab_valuation(top10, valuation):
         )
     st.markdown(
         f'<table class="qt"><thead><tr>'
-        f'<th>Ticker</th><th>DCF</th><th>Graham</th><th>EV/EBITDA</th><th>FCF Yield</th>'
+        f'<th>Ticker</th><th>DCF</th><th>Graham</th><th>EV/EBITDA</th><th>FCF Yield</th><th>EPV</th>'
         f'<th>Fair Value</th><th>Entry −20%</th><th>Entry −10%</th>'
         f'<th>Current</th><th>Premium</th><th>Stop Loss</th><th>R/R</th><th>Signal</th>'
         f'</tr></thead><tbody>{rows}</tbody></table>',
@@ -4091,10 +4223,11 @@ def _render_stock_detail(
     mc   = val.get("methods_count", 0)
 
     method_rows = [
-        ("DCF (2-stage)",    est.get("dcf"),      "2-stage FCF model, rf + 5.5% discount"),
-        ("Graham Number",    est.get("graham"),    "√(22.5 × EPS × Book Value)"),
-        ("EV/EBITDA Target", est.get("ev_ebitda"), "Sector-median multiple → implied price"),
-        ("FCF Yield @4.5%",  est.get("fcf_yield"), "FCF/share ÷ 4.5% target yield"),
+        ("DCF (2-stage)",      est.get("dcf"),      "2-stage FCF model, rf + 5.5% discount"),
+        ("Graham Number",      est.get("graham"),    "√(22.5 × EPS × Book Value)"),
+        ("EV/EBITDA Target",   est.get("ev_ebitda"), "Sector-median multiple → implied price"),
+        ("FCF Yield (dynamic)", est.get("fcf_yield"), "FCF/share ÷ dynamic yield target (rf + 3%)"),
+        ("EPV (Greenwald)",    est.get("epv"),       "Zero-growth earnings power perpetuity"),
     ]
 
     val_rows_html = ""
@@ -5967,7 +6100,7 @@ def render_session_detail(session: dict):
         if crash_s is not None:
             cs_c = RED if crash_s >= 3 else AMBER if crash_s >= 2 else TEXT
             snap_html += (
-                f'<span style="color:{cs_c}">Crash signals <b>{crash_s}/5</b></span>'
+                f'<span style="color:{cs_c}">Crash signals <b>{crash_s}/7</b></span>'
             )
         snap_html += '</div>'
         st.markdown(snap_html, unsafe_allow_html=True)
@@ -6660,7 +6793,7 @@ def main():
     # ── Page header ────────────────────────────────────────────────────────
     st.markdown(
         f'<div class="ptitle">Stock Ranking Advisor</div>'
-        f'<div class="psub">v3  ·  Pure Quantitative  ·  No AI APIs  ·  '
+        f'<div class="psub">v{VERSION}  ·  Pure Quantitative  ·  No AI APIs  ·  '
         f'{profile.risk_label}  ·  {HORIZON_LABELS[profile.time_horizon]}  ·  '
         f'${profile.portfolio_size:,.0f}  ·  {profile.goal_label}</div>',
         unsafe_allow_html=True,
