@@ -19,7 +19,27 @@ Usage (called from main.py and app.py after scorer.score_all()):
 
 import math
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
+
+
+def _get_st_ctx():
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx()
+    except Exception:
+        return None
+
+
+def _add_st_ctx(ctx) -> None:
+    if ctx is None:
+        return
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+    except Exception:
+        pass
 
 import numpy as np
 import pandas as pd
@@ -282,57 +302,66 @@ def fetch_fmp_data(ticker: str) -> dict:
             return {}
         base = "https://financialmodelingprep.com/api/v3"
         out  = {}
+        _fmp_ctx = _get_st_ctx()
 
-        # ── Analyst estimate revisions ─────────────────────────────────────────
-        try:
-            r = requests.get(
-                f"{base}/analyst-estimates/{ticker}",
-                params={"limit": 4, "apikey": FMP_KEY},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                est = r.json()
-                if len(est) >= 2:
-                    cur_eps  = float(est[0].get("estimatedEpsAvg") or 0)
-                    prev_eps = float(est[1].get("estimatedEpsAvg") or 0)
-                    if abs(prev_eps) > 0.01:
-                        # Positive = analysts are RAISING estimates (bullish)
-                        revision = (cur_eps - prev_eps) / abs(prev_eps)
-                        out["fmp_analyst_revision"] = max(-1.0, min(1.0, revision))
-        except Exception:
-            pass
+        def _get_analyst():
+            _add_st_ctx(_fmp_ctx)
+            try:
+                r = requests.get(
+                    f"{base}/analyst-estimates/{ticker}",
+                    params={"limit": 4, "apikey": FMP_KEY},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    est = r.json()
+                    if len(est) >= 2:
+                        cur_eps  = float(est[0].get("estimatedEpsAvg") or 0)
+                        prev_eps = float(est[1].get("estimatedEpsAvg") or 0)
+                        if abs(prev_eps) > 0.01:
+                            revision = (cur_eps - prev_eps) / abs(prev_eps)
+                            out["fmp_analyst_revision"] = max(-1.0, min(1.0, revision))
+            except Exception:
+                pass
 
-        # ── Financial health rating (1–5 scale → 0–100) ───────────────────────
-        try:
-            r = requests.get(
-                f"{base}/rating/{ticker}",
-                params={"apikey": FMP_KEY},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                rat = r.json()
-                if rat:
-                    score = float(rat[0].get("ratingScore") or 3)
-                    out["fmp_rating_score"] = (score / 5) * 100
-        except Exception:
-            pass
+        def _get_rating():
+            _add_st_ctx(_fmp_ctx)
+            try:
+                r = requests.get(
+                    f"{base}/rating/{ticker}",
+                    params={"apikey": FMP_KEY},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    rat = r.json()
+                    if rat:
+                        score = float(rat[0].get("ratingScore") or 3)
+                        out["fmp_rating_score"] = (score / 5) * 100
+            except Exception:
+                pass
 
-        # ── Revenue growth (annual income statement) ───────────────────────────
-        try:
-            r = requests.get(
-                f"{base}/income-statement/{ticker}",
-                params={"limit": 2, "period": "annual", "apikey": FMP_KEY},
-                timeout=8,
-            )
-            if r.status_code == 200:
-                inc = r.json()
-                if len(inc) >= 2:
-                    rev_cur  = float(inc[0].get("revenue") or 0)
-                    rev_prev = float(inc[1].get("revenue") or 0)
-                    if rev_prev > 0:
-                        out["fmp_revenue_growth"] = (rev_cur - rev_prev) / rev_prev
-        except Exception:
-            pass
+        def _get_income():
+            _add_st_ctx(_fmp_ctx)
+            try:
+                r = requests.get(
+                    f"{base}/income-statement/{ticker}",
+                    params={"limit": 2, "period": "annual", "apikey": FMP_KEY},
+                    timeout=8,
+                )
+                if r.status_code == 200:
+                    inc = r.json()
+                    if len(inc) >= 2:
+                        rev_cur  = float(inc[0].get("revenue") or 0)
+                        rev_prev = float(inc[1].get("revenue") or 0)
+                        if rev_prev > 0:
+                            out["fmp_revenue_growth"] = (rev_cur - rev_prev) / rev_prev
+            except Exception:
+                pass
+
+        with ThreadPoolExecutor(max_workers=3) as _pool:
+            _fa = _pool.submit(_get_analyst)
+            _fr = _pool.submit(_get_rating)
+            _fi = _pool.submit(_get_income)
+            _fa.result(); _fr.result(); _fi.result()
 
         time.sleep(0.5)   # polite — 250/day limit is generous
         return out
@@ -425,10 +454,11 @@ def fetch_sec_revenue_trend(ticker: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def enrich_top_n(
-    ranked_df:     pd.DataFrame,
-    universe_data: dict,
-    macro_data:    dict,
-    n:             int = 30,
+    ranked_df:         pd.DataFrame,
+    universe_data:     dict,
+    macro_data:        dict,
+    n:                 int  = 30,
+    progress_callback = None,   # callable(done: int, total: int) — optional live progress
 ) -> pd.DataFrame:
     """
     Tier 2 enrichment: runs options flow, Google Trends, and Reddit sentiment
@@ -485,105 +515,125 @@ def enrich_top_n(
         label  = f"{ticker:<6}  {step}" if ticker else ""
         print(f"  [{bar}] {pct:4.0f}%  {done}/{total}  {label:<30}", end="\r", flush=True)
 
+    # ── Alpha Vantage pre-pass (sequential — 5 calls/min rate limit) ──────────
+    av_results: dict = {}
     for i, ticker in enumerate(top_tickers):
         data = universe_data.get(ticker)
         if not data:
-            _bar(i + 1, "skip (no data)", ticker)
+            av_results[ticker] = {}
             continue
+        _bar(i, "Alpha Vantage...", ticker)
+        try:
+            av_results[ticker] = fetch_alpha_vantage_earnings(ticker)
+        except Exception:
+            av_results[ticker] = {}
+            _source_failures["av"] += 1
+
+    # ── Parallel enrichment (Options · Reddit · FMP · SEC · Smart Money) ─────
+    _data_lock  = threading.Lock()
+    _fail_lock  = threading.Lock()
+    _done_count = [0]
+    _enrich_ctx = _get_st_ctx()
+
+    def _enrich_one(args):
+        _add_st_ctx(_enrich_ctx)
+        i, ticker = args
+        data = universe_data.get(ticker)
+        if not data:
+            with _data_lock:
+                _done_count[0] += 1
+                _bar(_done_count[0], "skip (no data)", ticker)
+                if progress_callback:
+                    try: progress_callback(_done_count[0], total)
+                    except Exception: pass
+            return
 
         hist  = data.get("history")
         info  = data.get("info", {})
         if hist is None or len(hist) < 20:
-            _bar(i + 1, "skip (no hist)", ticker)
-            continue
+            with _data_lock:
+                _done_count[0] += 1
+                _bar(_done_count[0], "skip (no hist)", ticker)
+                if progress_callback:
+                    try: progress_callback(_done_count[0], total)
+                    except Exception: pass
+            return
 
         close = hist["Close"].dropna()
         if len(close) < 20:
-            _bar(i + 1, "skip (no hist)", ticker)
-            continue
+            with _data_lock:
+                _done_count[0] += 1
+                _bar(_done_count[0], "skip (no hist)", ticker)
+                if progress_callback:
+                    try: progress_callback(_done_count[0], total)
+                    except Exception: pass
+            return
 
         hist_vol = float(close.pct_change().dropna().std()) * math.sqrt(252)
 
         # ── Source 3: Options ─────────────────────────────────────────────────
-        _bar(i, "Options...    ", ticker)
         try:
             opt = fetch_options_data(ticker, hist_vol)
         except Exception:
             opt = {}
-            _source_failures["options"] += 1
+            with _fail_lock:
+                _source_failures["options"] += 1
         opt_score = opt.get("options_score", 50.0)
         iv_rank   = opt.get("iv_rank")
-        if iv_rank is not None:
-            universe_data[ticker]["iv_rank"] = iv_rank   # for risk.py
 
         # ── Google Trends (from pre-fetched batch) ────────────────────────────
-        _bar(i, "Trends...     ", ticker)
         trends_score = _trends_batch.get(ticker, 50.0)
         if trends_score == 50.0 and ticker not in _trends_batch:
-            _source_failures["trends"] += 1
+            with _fail_lock:
+                _source_failures["trends"] += 1
 
         # ── Reddit ────────────────────────────────────────────────────────────
-        _bar(i, "Reddit...     ", ticker)
         try:
             reddit_score = fetch_reddit_sentiment(ticker)
         except Exception:
             reddit_score = 50.0
-            _source_failures["reddit"] += 1
+            with _fail_lock:
+                _source_failures["reddit"] += 1
         retail_score = 0.60 * trends_score + 0.40 * reddit_score
 
-        # ── Source 4: Alpha Vantage — EPS surprise history ────────────────────
-        _bar(i, "Alpha Vantage...", ticker)
-        try:
-            av_data = fetch_alpha_vantage_earnings(ticker)
-        except Exception:
-            av_data = {}
-            _source_failures["av"] += 1
+        # ── Source 4: Alpha Vantage (pre-fetched above) ───────────────────────
+        av_data      = av_results.get(ticker, {})
         av_beat_rate = av_data.get("av_eps_beat_rate")
         av_surp_avg  = av_data.get("av_eps_surprise_avg")
-        if av_data:
-            universe_data[ticker]["av_data"] = av_data
 
         # ── Source 5: FMP — analyst revisions + financial rating ──────────────
-        _bar(i, "FMP...        ", ticker)
         try:
             fmp_data = fetch_fmp_data(ticker)
         except Exception:
             fmp_data = {}
-            _source_failures["fmp"] += 1
-        fmp_revision = fmp_data.get("fmp_analyst_revision")    # −1 to +1
-        fmp_rating   = fmp_data.get("fmp_rating_score")        # 0–100
-        fmp_rev_gro  = fmp_data.get("fmp_revenue_growth")      # YoY %
-        if fmp_data:
-            universe_data[ticker]["fmp_data"] = fmp_data
+            with _fail_lock:
+                _source_failures["fmp"] += 1
+        fmp_revision = fmp_data.get("fmp_analyst_revision")
+        fmp_rating   = fmp_data.get("fmp_rating_score")
+        fmp_rev_gro  = fmp_data.get("fmp_revenue_growth")
 
         # ── Source 6: SEC EDGAR — revenue validation/fallback ────────────────
-        # Only fetch from SEC if yfinance revenue is missing (saves bandwidth)
-        _bar(i, "SEC EDGAR...  ", ticker)
         sec_data = {}
         try:
             if data.get("revenue_trend") is None and info.get("totalRevenue") is None:
                 sec_data = fetch_sec_revenue_trend(ticker)
-                if sec_data.get("sec_revenue_trend") is not None:
-                    universe_data[ticker]["sec_revenue_trend"] = sec_data["sec_revenue_trend"]
         except Exception:
-            _source_failures["sec"] += 1
+            with _fail_lock:
+                _source_failures["sec"] += 1
 
         # ── Source 7: SEC Smart Money — Form 4 cluster + 8-K NLP ─────────────
-        _bar(i, "Smart Money...", ticker)
         sm_data = {}
         try:
             from advisor.smart_money import fetch_smart_money as _fetch_smart_money
             sm_data = _fetch_smart_money(ticker, _cik_map)
-            if sm_data:
-                universe_data[ticker]["smart_money"] = sm_data
         except Exception:
-            _source_failures["smart_money"] += 1
+            with _fail_lock:
+                _source_failures["smart_money"] += 1
 
         # ── Build full 5-source sentiment (0–100) ─────────────────────────────
         news_score    = float(data.get("sentiment",     50.0))
         insider_score = float(data.get("insider_score", 50.0))
 
-        # Analyst score — blend base rec with FMP revision if available
         rec_map = {"strong_buy": 90, "buy": 75, "hold": 50, "sell": 25, "strong_sell": 10}
         rec          = (info.get("recommendationKey") or "").lower()
         rec_score    = rec_map.get(rec, 50)
@@ -594,7 +644,6 @@ def enrich_top_n(
         cov_score    = float(max(10, min(100, n_ana / 20 * 100)))
         analyst_score = 0.40 * rec_score + 0.40 * upside_score + 0.20 * cov_score
 
-        # Blend FMP analyst revision into the analyst component
         if fmp_revision is not None:
             revision_score = max(0.0, min(100.0, 50.0 + fmp_revision * 50.0))
             analyst_score  = analyst_score * 0.60 + revision_score * 0.40
@@ -607,59 +656,65 @@ def enrich_top_n(
             0.10 * retail_score
         )
 
-        # ── Direct composite boosts from new sources ──────────────────────────
-        # Source 4: earnings momentum (AV EPS beats)
         earnings_boost = 0.0
         if av_beat_rate is not None:
-            # 75%+ beat rate → +3 pts; 25% → -3 pts
             earnings_boost += (float(av_beat_rate) - 0.50) * 6.0
         if av_surp_avg is not None:
-            # Average EPS surprise >5% → small additional boost (max ±2 pts)
             earnings_boost += max(-2.0, min(2.0, float(av_surp_avg) * 0.05))
 
-        # Source 5: FMP financial rating + revenue growth
         rating_boost = 0.0
         if fmp_rating is not None:
-            rating_boost = (float(fmp_rating) - 50.0) * 0.04   # ±2 pts max
+            rating_boost = (float(fmp_rating) - 50.0) * 0.04
         rev_boost = 0.0
         if fmp_rev_gro is not None:
             rev_boost = max(-2.0, min(2.0, float(fmp_rev_gro) * 5.0))
 
-        # Source 6: SEC-derived revenue trend bonus (if yfinance was missing it)
         sec_boost = 0.0
         if sec_data.get("sec_revenue_trend") is not None:
             rv = float(sec_data["sec_revenue_trend"])
             sec_boost = max(-1.5, min(1.5, rv * 4.0))
 
-        # Source 7: SEC smart money boost
-        # Form 4 cluster signal: 3+ insiders buying → +2.5 pts max
-        # 8-K event quality: positive catalyst items → up to +2 pts
         smart_boost = 0.0
         if sm_data:
             sm_score = sm_data.get("smart_money_score")
             if sm_score is not None:
-                # 50 = neutral, 100 = maximum bullish → ±3 pts
                 smart_boost = max(-3.0, min(3.0, (float(sm_score) - 50.0) * 0.06))
 
-        # ── Apply all deltas to composite_score ───────────────────────────────
-        mask = ranked_df["ticker"] == ticker
-        if not mask.any():
-            continue
-        idx = ranked_df.index[mask][0]
-
-        old_sentiment = float(ranked_df.loc[idx, "sentiment_score"])
-        sentiment_delta = (new_sentiment - old_sentiment) * _SENTIMENT_W
         total_boost = earnings_boost + rating_boost + rev_boost + sec_boost + smart_boost
 
-        ranked_df.loc[idx, "sentiment_score"] = round(new_sentiment, 2)
-        ranked_df.loc[idx, "composite_score"] = float(max(
-            0.0, min(100.0,
-                ranked_df.loc[idx, "composite_score"] + sentiment_delta + total_boost
-            )
-        ))
+        # ── Write all shared state under lock ────────────────────────────────
+        with _data_lock:
+            if iv_rank is not None:
+                universe_data[ticker]["iv_rank"] = iv_rank
+            if av_data:
+                universe_data[ticker]["av_data"] = av_data
+            if fmp_data:
+                universe_data[ticker]["fmp_data"] = fmp_data
+            if sec_data.get("sec_revenue_trend") is not None:
+                universe_data[ticker]["sec_revenue_trend"] = sec_data["sec_revenue_trend"]
+            if sm_data:
+                universe_data[ticker]["smart_money"] = sm_data
 
-        # Tick progress bar after fully completing this ticker
-        _bar(i + 1, "done          ", ticker)
+            mask = ranked_df["ticker"] == ticker
+            if mask.any():
+                idx = ranked_df.index[mask][0]
+                old_sentiment   = float(ranked_df.loc[idx, "sentiment_score"])
+                sentiment_delta = (new_sentiment - old_sentiment) * _SENTIMENT_W
+                ranked_df.loc[idx, "sentiment_score"] = round(new_sentiment, 2)
+                ranked_df.loc[idx, "composite_score"] = float(max(
+                    0.0, min(100.0,
+                        ranked_df.loc[idx, "composite_score"] + sentiment_delta + total_boost
+                    )
+                ))
+
+            _done_count[0] += 1
+            _bar(_done_count[0], "done          ", ticker)
+            if progress_callback:
+                try: progress_callback(_done_count[0], total)
+                except Exception: pass
+
+    with ThreadPoolExecutor(max_workers=5) as _pool:
+        list(_pool.map(_enrich_one, enumerate(top_tickers)))
 
     print(f"  [{'█' * 20}] 100%  {total}/{total}  Tier 2 enrichment complete." + " " * 10)
 

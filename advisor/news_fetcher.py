@@ -16,7 +16,27 @@ Usage:
 
 import datetime
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Optional
+
+
+def _get_st_ctx():
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx()
+    except Exception:
+        return None
+
+
+def _add_st_ctx(ctx) -> None:
+    if ctx is None:
+        return
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+    except Exception:
+        pass
 
 import requests
 import yfinance as yf
@@ -94,26 +114,44 @@ class NewsFetcher:
         """
         Return up to `n` articles for `ticker`, newest first.
         Each dict: { title, source, url, published, summary, sentiment_hint }
+        All sources are fetched concurrently.
         """
         articles: List[Dict] = []
         seen:     set         = set()
+        _lock = threading.Lock()
+        _ctx  = _get_st_ctx()
 
-        def _add(batch):
-            for a in batch:
-                key = (a.get("title") or "")[:80].lower()
-                if key and key not in seen:
-                    seen.add(key)
-                    articles.append(a)
+        def _add_safe(batch):
+            with _lock:
+                for a in batch:
+                    key = (a.get("title") or "")[:80].lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        articles.append(a)
 
-        _add(self._yf_news(ticker))
-        _add(self._rss_news(ticker))
-        _add(self._ap_news(ticker))
-        _add(self._marketwatch_news(ticker))
-        _add(self._benzinga_news(ticker))
+        def _fetch_src(src):
+            _add_st_ctx(_ctx)
+            return src(ticker)
+
+        sources = [
+            self._yf_news,
+            self._rss_news,
+            self._ap_news,
+            self._marketwatch_news,
+            self._benzinga_news,
+        ]
         if self._fh_key:
-            _add(self._finnhub_news(ticker))
-        if self._na_key and len(articles) < n:
-            _add(self._newsapi_news(ticker))
+            sources.append(self._finnhub_news)
+        if self._na_key:
+            sources.append(self._newsapi_news)
+
+        with ThreadPoolExecutor(max_workers=len(sources)) as pool:
+            futs = [pool.submit(_fetch_src, src) for src in sources]
+            for f in as_completed(futs):
+                try:
+                    _add_safe(f.result())
+                except Exception:
+                    pass
 
         articles.sort(key=lambda x: x.get("published", ""), reverse=True)
         # Tag each article with a quick sentiment hint

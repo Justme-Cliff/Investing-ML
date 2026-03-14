@@ -7,7 +7,29 @@ import logging
 import datetime
 import contextlib
 import warnings
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
+
+
+def _get_st_ctx():
+    """Capture Streamlit ScriptRunContext from the calling thread (None in CLI mode)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx()
+    except Exception:
+        return None
+
+
+def _add_st_ctx(ctx) -> None:
+    """Inject a captured context into the current thread — silences ScriptRunContext warnings."""
+    if ctx is None:
+        return
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx
+        add_script_run_ctx(threading.current_thread(), ctx)
+    except Exception:
+        pass
 
 import numpy as np
 import pandas as pd
@@ -311,23 +333,24 @@ class DataFetcher:
         self.failed: List[str] = []
 
     def fetch_universe(self, tickers: List[str], progress_callback=None) -> Dict:
-        """Fetch all tickers.  progress_callback(done: int, total: int) is called
-        after every ticker so callers (e.g. Streamlit) can update a progress bar
-        in real time instead of waiting for the entire fetch to finish."""
+        """Fetch all tickers in parallel (15 workers).
+        progress_callback(done: int, total: int) is called after every ticker."""
         results: Dict = {}
-        total = len(tickers)
-        done  = 0
-        batches = [tickers[i:i + 20] for i in range(0, total, 20)]
+        total  = len(tickers)
+        _done  = [0]          # mutable counter shared across threads
+        _lock  = threading.Lock()
+        _ctx   = _get_st_ctx()   # capture Streamlit context before spawning threads
 
-        print(f"\nFetching data for {total} stocks  ({len(batches)} batches)...")
-        for bi, batch in enumerate(batches, 1):
-            for ticker in batch:
-                data = self._fetch_one(ticker)
+        def _fetch_and_store(ticker: str) -> None:
+            _add_st_ctx(_ctx)    # propagate to worker thread — prevents ScriptRunContext warnings
+            data = self._fetch_one(ticker)
+            with _lock:
                 if data:
                     results[ticker] = data
                 else:
                     self.failed.append(ticker)
-                done += 1
+                _done[0] += 1
+                done   = _done[0]
                 pct    = done / total * 100
                 filled = int(pct / 5)
                 bar    = "█" * filled + "░" * (20 - filled)
@@ -337,10 +360,12 @@ class DataFetcher:
                         progress_callback(done, total)
                     except Exception:
                         pass  # never let a UI callback crash the fetch
-            if bi < len(batches):
-                time.sleep(0.4)
 
-        print(f"  [{'█'*20}] 100%  {done}/{done}" + " " * 15)
+        print(f"\nFetching data for {total} stocks  (parallel, 15 workers)...")
+        with ThreadPoolExecutor(max_workers=15) as pool:
+            list(pool.map(_fetch_and_store, tickers))
+
+        print(f"  [{'█'*20}] 100%  {total}/{total}" + " " * 15)
         print(f"  Loaded: {len(results)}  |  Skipped: {len(self.failed)}")
         return results
 
@@ -810,64 +835,72 @@ class MacroFetcher:
         }
         sink = io.StringIO()
 
-        # VIX — 3-month history; compute 5-day velocity for panic detection
-        try:
-            with contextlib.redirect_stderr(sink):
-                vix_hist = yf.Ticker(VIX_TICKER).history(period="3mo")
-            if vix_hist is not None and len(vix_hist) > 5:
-                result["vix"]      = float(vix_hist["Close"].iloc[-1])
-                result["vix_hist"] = vix_hist
-                if len(vix_hist) >= 6:
-                    result["vix_velocity"] = float(
-                        vix_hist["Close"].iloc[-1] - vix_hist["Close"].iloc[-6]
+        # ── Parallel yfinance fetches (VIX · yields · HYG · SPY · sector ETFs) ──
+        _macro_ctx = _get_st_ctx()
+
+        def _fetch_vix():
+            _add_st_ctx(_macro_ctx)
+            try:
+                with contextlib.redirect_stderr(sink):
+                    vix_hist = yf.Ticker(VIX_TICKER).history(period="3mo")
+                if vix_hist is not None and len(vix_hist) > 5:
+                    result["vix"]      = float(vix_hist["Close"].iloc[-1])
+                    result["vix_hist"] = vix_hist
+                    if len(vix_hist) >= 6:
+                        result["vix_velocity"] = float(
+                            vix_hist["Close"].iloc[-1] - vix_hist["Close"].iloc[-6]
+                        )
+            except Exception:
+                pass
+
+        def _fetch_tnx():
+            _add_st_ctx(_macro_ctx)
+            try:
+                with contextlib.redirect_stderr(sink):
+                    tnx_hist = yf.Ticker(YIELD_10Y_TICKER).history(period="3mo")
+                if tnx_hist is not None and len(tnx_hist) > 5:
+                    result["yield_10y"]  = float(tnx_hist["Close"].iloc[-1])
+                    result["yield_hist"] = tnx_hist
+            except Exception:
+                pass
+
+        def _fetch_irx():
+            _add_st_ctx(_macro_ctx)
+            try:
+                with contextlib.redirect_stderr(sink):
+                    irx_hist = yf.Ticker("^IRX").history(period="5d")
+                if irx_hist is not None and len(irx_hist) > 0:
+                    result["yield_3m"] = float(irx_hist["Close"].iloc[-1])
+            except Exception:
+                pass
+
+        def _fetch_hyg():
+            _add_st_ctx(_macro_ctx)
+            try:
+                with contextlib.redirect_stderr(sink):
+                    hyg_hist = yf.Ticker("HYG").history(period="2mo")
+                if hyg_hist is not None and len(hyg_hist) > 20:
+                    hyg_1m_ret = float(
+                        hyg_hist["Close"].iloc[-1] / hyg_hist["Close"].iloc[-21] - 1
                     )
-        except Exception:
-            pass
+                    result["credit_stress"] = hyg_1m_ret < -0.03
+            except Exception:
+                pass
 
-        # 10Y Treasury yield
-        try:
-            with contextlib.redirect_stderr(sink):
-                tnx_hist = yf.Ticker(YIELD_10Y_TICKER).history(period="3mo")
-            if tnx_hist is not None and len(tnx_hist) > 5:
-                result["yield_10y"]  = float(tnx_hist["Close"].iloc[-1])
-                result["yield_hist"] = tnx_hist
-        except Exception:
-            pass
+        def _fetch_spy():
+            _add_st_ctx(_macro_ctx)
+            try:
+                with contextlib.redirect_stderr(sink):
+                    spy_hist = yf.Ticker("SPY").history(period="1y")
+                if spy_hist is not None and len(spy_hist) > 20:
+                    spy_high = float(spy_hist["Close"].max())
+                    spy_now  = float(spy_hist["Close"].iloc[-1])
+                    result["market_drawdown_pct"] = (spy_now / spy_high - 1) * 100
+            except Exception:
+                pass
 
-        # 3-month T-bill yield (^IRX) — yield curve inversion check
-        try:
-            with contextlib.redirect_stderr(sink):
-                irx_hist = yf.Ticker("^IRX").history(period="5d")
-            if irx_hist is not None and len(irx_hist) > 0:
-                result["yield_3m"] = float(irx_hist["Close"].iloc[-1])
-        except Exception:
-            pass
-
-        # HYG (iShares High Yield ETF) — credit stress proxy
-        try:
-            with contextlib.redirect_stderr(sink):
-                hyg_hist = yf.Ticker("HYG").history(period="2mo")
-            if hyg_hist is not None and len(hyg_hist) > 20:
-                hyg_1m_ret = float(
-                    hyg_hist["Close"].iloc[-1] / hyg_hist["Close"].iloc[-21] - 1
-                )
-                result["credit_stress"] = hyg_1m_ret < -0.03
-        except Exception:
-            pass
-
-        # SPY (1-year) — market drawdown from 52-week high
-        try:
-            with contextlib.redirect_stderr(sink):
-                spy_hist = yf.Ticker("SPY").history(period="1y")
-            if spy_hist is not None and len(spy_hist) > 20:
-                spy_high = float(spy_hist["Close"].max())
-                spy_now  = float(spy_hist["Close"].iloc[-1])
-                result["market_drawdown_pct"] = (spy_now / spy_high - 1) * 100
-        except Exception:
-            pass
-
-        # Sector ETF 3-month returns
-        for sector, etf in SECTOR_ETFS.items():
+        def _fetch_sector(sector: str, etf: str):
+            _add_st_ctx(_macro_ctx)
             try:
                 with contextlib.redirect_stderr(sink):
                     hist = yf.Ticker(etf).history(period="3mo")
@@ -876,6 +909,17 @@ class MacroFetcher:
                     result["sector_etf"][sector] = round(ret * 100, 2)
             except Exception:
                 pass
+
+        _macro_futs = [_fetch_vix, _fetch_tnx, _fetch_irx, _fetch_hyg, _fetch_spy]
+        _sector_futs = [(s, e) for s, e in SECTOR_ETFS.items()]
+        with ThreadPoolExecutor(max_workers=5 + len(_sector_futs)) as _pool:
+            _submitted = [_pool.submit(fn) for fn in _macro_futs]
+            _submitted += [_pool.submit(_fetch_sector, s, e) for s, e in _sector_futs]
+            for _f in _submitted:
+                try:
+                    _f.result()
+                except Exception:
+                    pass
 
         # ── Source 3: FRED extended macro (recession prob, HY spread, sentiment) ─
         fred_extra = self._fetch_fred_extended()
@@ -1016,7 +1060,10 @@ class MacroFetcher:
             "consumer_sentiment":   "UMCSENT",         # Univ of Michigan index
             "yield_10_2_spread":    "T10Y2Y",          # 10Y minus 2Y (negative = inverted)
         }
-        for key, series_id in series.items():
+        _fred_ctx = _get_st_ctx()
+
+        def _fetch_series(key: str, series_id: str):
+            _add_st_ctx(_fred_ctx)
             try:
                 r = requests.get(
                     base,
@@ -1033,10 +1080,20 @@ class MacroFetcher:
                     for obs in r.json().get("observations", []):
                         val = obs.get("value", ".")
                         if val != ".":
-                            out[key] = float(val)
-                            break
+                            return key, float(val)
             except Exception:
                 pass
+            return key, None
+
+        with ThreadPoolExecutor(max_workers=4) as _pool:
+            _futs = {_pool.submit(_fetch_series, k, v): k for k, v in series.items()}
+            for _f in as_completed(_futs):
+                try:
+                    _key, _val = _f.result()
+                    if _val is not None:
+                        out[_key] = _val
+                except Exception:
+                    pass
         return out
 
     def _classify(self, m: dict):

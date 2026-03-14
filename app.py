@@ -1135,7 +1135,15 @@ def run_analysis(profile: UserProfile) -> dict:
     prog.progress(50, text="Enriching top 30 with options flow + retail sentiment…")
     try:
         from advisor.alternative_data import enrich_top_n
-        ranked_df = enrich_top_n(ranked_df, res["universe_data"], res["macro_data"], n=30)
+
+        def _tier2_progress(done: int, total: int) -> None:
+            pct = 50 + int(done / total * 12)   # maps 0-30 tickers → 50-62%
+            prog.progress(pct, text=f"Enriching top 30 … {done}/{total}")
+
+        ranked_df = enrich_top_n(
+            ranked_df, res["universe_data"], res["macro_data"],
+            n=30, progress_callback=_tier2_progress,
+        )
     except Exception:
         pass   # enrichment is best-effort; pipeline continues regardless
 
@@ -2706,7 +2714,7 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
                    gridcolor="#1E2535"),
         yaxis=dict(tickfont=dict(size=12, family="monospace"), gridcolor="#1E2535"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # ── Factor radar + score distribution ─────────────────────────────────────
     col_rad, col_hist = st.columns([1, 1])
@@ -2714,13 +2722,13 @@ def tab_rankings(top10, profile, valuation, protocol, risk=None):
         st.markdown(shdr("Factor Fingerprint", "Top-5 picks — 7-factor radar chart"),
                     unsafe_allow_html=True)
         ranked_df = st.session_state.results.get("ranked_df", pd.DataFrame())
-        st.plotly_chart(_factor_radar_chart(top10), use_container_width=True)
+        st.plotly_chart(_factor_radar_chart(top10), width="stretch")
     with col_hist:
         st.markdown(shdr("Score Distribution", "Portfolio picks vs full universe"),
                     unsafe_allow_html=True)
         ranked_df = st.session_state.results.get("ranked_df", pd.DataFrame())
         if not ranked_df.empty:
-            st.plotly_chart(_score_distribution_chart(ranked_df, top10), use_container_width=True)
+            st.plotly_chart(_score_distribution_chart(ranked_df, top10), width="stretch")
         else:
             st.caption("Score distribution not available.")
 
@@ -2869,7 +2877,7 @@ def tab_valuation(top10, valuation):
             yaxis=dict(tickfont=dict(size=12, family="monospace"), autorange="reversed"),
             showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with col_b:
         st.markdown(
@@ -2903,7 +2911,7 @@ def tab_valuation(top10, valuation):
             yaxis=dict(title="Price ($)", tickformat="$,.0f", gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=10, family="monospace")),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     # ── DCF Sensitivity — Bear / Base / Bull ───────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
@@ -2954,7 +2962,7 @@ def tab_valuation(top10, valuation):
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(shdr("DCF Scenario Comparison", "Bear / Base / Bull fair values vs current price (dashed)"),
                 unsafe_allow_html=True)
-    st.plotly_chart(_dcf_waterfall_chart(top10, valuation), use_container_width=True)
+    st.plotly_chart(_dcf_waterfall_chart(top10, valuation), width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3060,7 +3068,7 @@ def tab_risk(top10, risk, universe_data=None):
             xaxis=dict(title="Sharpe Ratio", gridcolor="#1E2535"),
             yaxis=dict(title="ROIC / WACC Spread (%)", gridcolor="#1E2535"),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     with col_b:
         st.markdown(
@@ -3091,7 +3099,7 @@ def tab_risk(top10, risk, universe_data=None):
             yaxis=dict(range=[0, 11], title="Score / 9", gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=11, family="monospace")),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
     # ── Monte Carlo ────────────────────────────────────────────────────────────
     if universe_data:
@@ -3099,7 +3107,7 @@ def tab_risk(top10, risk, universe_data=None):
         st.markdown(shdr("Monte Carlo Portfolio Simulation",
                          "200 paths · 252 trading days · Equal-weighted top-10"),
                     unsafe_allow_html=True)
-        st.plotly_chart(_monte_carlo_chart(top10, universe_data), use_container_width=True)
+        st.plotly_chart(_monte_carlo_chart(top10, universe_data), width="stretch")
 
     # ── Anti-Thesis Overview ──────────────────────────────────────────────────
     if universe_data:
@@ -3249,7 +3257,7 @@ def tab_risk(top10, risk, universe_data=None):
                 yaxis=dict(title="Monthly Loss (%)", gridcolor="#1E2535"),
                 xaxis=dict(tickfont=dict(size=11, family="monospace")),
             )
-            st.plotly_chart(fig_tail, use_container_width=True)
+            st.plotly_chart(fig_tail, width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3293,7 +3301,7 @@ def tab_protocol(top10, protocol):
         xaxis=dict(side="top", tickfont=dict(size=12)),
         yaxis=dict(tickfont=dict(size=12, family="monospace"), autorange="reversed"),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.markdown(shdr("Protocol Summary"), unsafe_allow_html=True)
     rows = ""
@@ -3373,7 +3381,7 @@ def tab_portfolio(top10, profile):
             **_plotly_base(), height=360,
             margin=dict(l=0, r=0, t=0, b=0), showlegend=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         n_sectors = len(set(sectors))
         max_w     = max(weights) * 100 if weights else 0
@@ -3448,7 +3456,7 @@ def tab_portfolio(top10, profile):
                        gridcolor="#1E2535"),
             xaxis=dict(tickfont=dict(size=11, family="monospace")),
         )
-        st.plotly_chart(fig2, use_container_width=True)
+        st.plotly_chart(fig2, width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3523,7 +3531,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
                 xaxis=dict(zeroline=True, zerolinecolor="#1E2535", gridcolor="#1E2535"),
                 showlegend=False,
             )
-            st.plotly_chart(fig_etf, use_container_width=True)
+            st.plotly_chart(fig_etf, width="stretch")
 
     with col_b:
         st.markdown(
@@ -3570,7 +3578,7 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
             xaxis=dict(title="Date", gridcolor="#1E2535"),
             yaxis=dict(title="Normalised (Base = 100)", gridcolor="#1E2535"),
         )
-        st.plotly_chart(fig_perf, use_container_width=True)
+        st.plotly_chart(fig_perf, width="stretch")
 
         # Correlation heatmap
         st.markdown(
@@ -3604,13 +3612,13 @@ def tab_macro(top10, macro, universe_data, sp500_hist, profile):
                 xaxis=dict(tickfont=dict(size=10, family="monospace")),
                 yaxis=dict(tickfont=dict(size=10, family="monospace"), autorange="reversed"),
             )
-            st.plotly_chart(fig_corr, use_container_width=True)
+            st.plotly_chart(fig_corr, width="stretch")
 
         # ── Yield Curve ────────────────────────────────────────────────────────
         st.markdown("<br>", unsafe_allow_html=True)
         st.markdown(shdr("Yield Curve", "3M · 2Y · 10Y  ·  Red fill = inverted curve"),
                     unsafe_allow_html=True)
-        st.plotly_chart(_yield_curve_chart(macro), use_container_width=True)
+        st.plotly_chart(_yield_curve_chart(macro), width="stretch")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -4199,7 +4207,7 @@ def _render_stock_detail(
             hist_c = hist.copy()
             if hasattr(hist_c.index, "tz") and hist_c.index.tz is not None:
                 hist_c.index = hist_c.index.tz_localize(None)
-            st.plotly_chart(_candlestick_fig(ticker, hist_c, period), use_container_width=True)
+            st.plotly_chart(_candlestick_fig(ticker, hist_c, period), width="stretch")
         except Exception:
             st.info("Chart unavailable.")
     else:
@@ -5060,7 +5068,7 @@ def tab_backtest(top10, universe_data: dict, valuation: dict, risk: dict, rf_rat
             yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False,
                        title="Equity (base 100)", ticksuffix=""),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     except Exception as _e:
         st.warning(f"Chart error: {_e}")
 
@@ -5569,7 +5577,7 @@ def tab_calendar(top10, universe_data: dict, valuation: dict = None, risk: dict 
             yaxis=dict(showgrid=False, autorange="reversed"),
             bargap=0.3,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     # ── Methodology note ─────────────────────────────────────────────────────
     st.markdown(
@@ -6066,7 +6074,7 @@ def render_session_detail(session: dict):
                 yaxis=dict(showgrid=True, gridcolor=BORDER, zeroline=False, ticksuffix="%"),
                 xaxis=dict(showgrid=False),
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # ── Full pick cards (with valuation, risk, protocol) ─────────────────────
     st.markdown(shdr("Full Portfolio — Picks As Generated",
